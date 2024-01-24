@@ -384,8 +384,6 @@ class PostgresModelHandler():
     """
     This is the class to define the postgres model.
 
-    # 命名規則為 ＿開頭，所有用戶傳進來的參數名稱不得牴觸
-
     Required Class Attributes:
         meta (dict): The meta data of this class.
             \- initialize (boolean): If this class will be initialized when server starts.
@@ -398,6 +396,20 @@ class PostgresModelHandler():
     Required Class Methods (when meta["conditional_init"] == True):
         if_initialize (method): The method to form the conditional initialization sql command.
         else_initialize (method): The method to form the conditional initialization sql command.
+    
+    Limitation:
+        \- The attribute name of the concrete class should not start with "_"
+    
+    The attributes of the concrete class which is inherited from this class:
+        _table_name (string): The table name.
+        _headers (list): The headers of the table.
+        _required_headers (list): The required headers of the table.
+        _headers_type (dict): The headers type of the table.
+        _headers_default (dict): The headers default value of the table.
+        _field_dict (dict): The field dictionary.
+        _field_conditions (string): The field conditions (sql conditions).
+        _field_index_dict (dict): The field index dictionary.
+        other attributes: Named by the headers of the table and the value is the default value of the table.
     """
     SCHEMA = "schema"
     TABLE = "table"
@@ -412,26 +424,35 @@ class PostgresModelHandler():
 
     def __init__(self) -> None:
         self._table_name = self.__class__.meta["table_name"][0]
-        self._field_dict = self.__class__.get_field_dict()
-        self._field_conditions = self.__class__.get_field_conditions()
-        self._field_index_dict = self.__class__.get_field_index_dict()
         self._headers = self.__class__.get_headers()
         self._required_headers = self.__class__.get_required_headers()
         self._headers_type = self.__class__.get_headers_type()
         self._headers_default = self.__class__.get_headers_default()
+        self._field_dict = self.__class__.get_field_dict()
+        self._field_conditions = self.__class__.get_field_conditions()
+        self._field_index_dict = self.__class__.get_field_index_dict()
 
         for k, v in self._headers_default.items():
             if not k.startswith("_"):
                 setattr(self, k, v)
-        
+    
     def to_table_format(self) -> dict:
-        dic = {}
+        ret_dict = {}
         _headers = self._headers
         for _header in _headers:
             if _header in self.__dict__:
-                dic[_header] = self.__dict__[_header]
-        print(dic)
-        return dic
+                ret_dict[_header] = self.__dict__[_header]
+        return ret_dict
+
+    @classmethod
+    def from_table_format(cls, table_data: list) -> list:
+        ret_list = []
+        fields = cls.get_field_dict()
+        for row in table_data:
+            new_obj = cls()
+            for key in row:
+                if key in fields:
+                    setattr(new_obj, key, row[key])
 
     @classmethod
     def _meta_inspector(cls):
@@ -505,7 +526,14 @@ class PostgresModelHandler():
 
     @classmethod
     def get_headers_default(cls) -> dict:
-        #TODO: 確認input是不是 serial pimary key, 是的話才會幫他做 serial 這件事
+        """
+        This is the method to get the default value of the headers.
+
+        Limitation:
+            \- If the default value is "''", it will be changed to "".
+            \- If the default value is "ARRAY[]::", it will be changed to [].
+            \- If the field is serial and primary key, it will be ignored.
+        """
         dic = {}
         for k, v in cls.__dict__.items():
             if isinstance(v, PostgresField):
