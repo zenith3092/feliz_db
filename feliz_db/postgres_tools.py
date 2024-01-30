@@ -714,7 +714,7 @@ class PostgresModelHandler():
             raise Exception("Invalid meta type")
 
     @classmethod
-    def execute_sql(cls, postgres_handler: PostgresHandler, sql_cb: None):
+    def execute_sql(cls, postgres_handler: PostgresHandler, sql_cb=None):
         """
         This is the method to execute the sql command.
 
