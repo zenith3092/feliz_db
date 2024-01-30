@@ -15,7 +15,7 @@ setuptools.setup(
     description="A framework designed to assist in using databases and compatible with feliz framework",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/zenith3092/feliz",
+    url="https://github.com/zenith3092/feliz_db",
     license="MIT",
     packages=setuptools.find_packages(),
     install_requires=requirements,
