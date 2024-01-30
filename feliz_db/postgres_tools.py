@@ -300,6 +300,7 @@ class PostgresHandler:
                 If this is an empty list, will get the complete header list from self.get_headers().
             to_null (boolean, optional): Defaults to False. If to_null == True, we will set the lacked data to null.
                 For example, adding_header_list=["camera_ip", "roi_id"], adding_list=[{"camera_ip":"123.456.789.0"}], then the target value of "roi_id" will be null(None).
+            no_ser_pk (boolean, optional): Defaults to True. If no_ser_pk == True, we will not add the serial primary key.
 
         Returns:
             result: result from _execute_sql without header and data
@@ -396,6 +397,20 @@ class PostgresModelHandler():
     Required Class Methods (when meta["conditional_init"] == True):
         if_initialize (method): The method to form the conditional initialization sql command.
         else_initialize (method): The method to form the conditional initialization sql command.
+    
+    Limitation:
+        \- The attribute name of the concrete class should not start with "_"
+    
+    The attributes of the concrete class which is inherited from this class:
+        _table_name (string): The table name.
+        _headers (list): The headers of the table.
+        _required_headers (list): The required headers of the table.
+        _headers_type (dict): The headers type of the table.
+        _headers_default (dict): The headers default value of the table.
+        _field_dict (dict): The field dictionary.
+        _field_conditions (string): The field conditions (sql conditions).
+        _field_index_dict (dict): The field index dictionary.
+        other attributes: Named by the headers of the table and the value is the default value of the table.
     """
     SCHEMA = "schema"
     TABLE = "table"
@@ -407,6 +422,54 @@ class PostgresModelHandler():
     _table_entries_dict = {}
     _schema_entries_dict = {}
     _index_entries_dict = {}
+
+    def __init__(self) -> None:
+        self._table_name = self.__class__.meta["table_name"][0]
+        self._headers = self.__class__.get_headers()
+        self._required_headers = self.__class__.get_required_headers()
+        self._headers_type = self.__class__.get_headers_type()
+        self._headers_default = self.__class__.get_headers_default()
+        self._field_dict = self.__class__.get_field_dict()
+        self._field_conditions = self.__class__.get_field_conditions()
+        self._field_index_dict = self.__class__.get_field_index_dict()
+
+        for k, v in self._headers_default.items():
+            if not k.startswith("_"):
+                setattr(self, k, v)
+    
+    def to_table_format(self) -> dict:
+        """
+        This is the method to form the object to the table data.
+
+        Returns:
+            ret_dict (dict): The table data.
+        """
+        ret_dict = {}
+        _headers = self._headers
+        for _header in _headers:
+            if _header in self.__dict__:
+                ret_dict[_header] = self.__dict__[_header]
+        return ret_dict
+
+    @classmethod
+    def from_table_format(cls, table_data: list) -> list:
+        """
+        This is the method to form the table data to the object.
+
+        Args:
+            table_data (list): The table data.
+        
+        Returns:
+            ret_list (list): The list of object.
+        """
+        ret_list = []
+        fields = cls.get_field_dict()
+        for row in table_data:
+            new_obj = cls()
+            for key in row:
+                if key in fields:
+                    setattr(new_obj, key, row[key])
+        return ret_list
 
     @classmethod
     def _meta_inspector(cls):
@@ -423,27 +486,28 @@ class PostgresModelHandler():
         
         lack_inspector(cls.META_REQUIRED)
 
+        if cls.meta["init_type"] == cls.TABLE:
+            lack_inspector(cls.TABLE_META_REQUIRED)
+            if type(cls.meta["table_name"]) != list:
+                raise Exception(f"( {cls.__name__} ) table_name should be list")
+            elif cls.meta["init_type"] == cls.TABLE and len(cls.meta["table_name"]) == 0:
+                raise Exception(f"( {cls.__name__} ) table_name should not be empty if init_type is table")
+            elif cls.meta["init_type"] == cls.TABLE and len(cls.meta["table_name"]) > 1:
+                raise Exception(f"( {cls.__name__} ) table_name should not be more than one")
+        
+        elif cls.meta["init_type"] == cls.SCHEMA:
+            lack_inspector(cls.SCHEMA_META_REQUIRED)
+        
+        else:
+            raise Exception(f"( {cls.__name__} ) Invalid init_type {cls.meta['init_type']}")
+
         if type(cls.meta["schema_name"]) != list:
             raise Exception(f"( {cls.__name__} ) schema_name should be list")
         elif len(cls.meta["schema_name"]) == 0:
             raise Exception(f"( {cls.__name__} ) schema_name should not be empty")
         elif cls.meta["init_type"] == cls.SCHEMA and len(cls.meta["schema_name"]) > 1:
             raise Exception(f"( {cls.__name__} ) schema_name should not be more than one if init_type is schema")
-        
-        if type(cls.meta["table_name"]) != list:
-            raise Exception(f"( {cls.__name__} ) table_name should be list")
-        elif cls.meta["init_type"] == cls.TABLE and len(cls.meta["table_name"]) == 0:
-            raise Exception(f"( {cls.__name__} ) table_name should not be empty if init_type is table")
-        elif cls.meta["init_type"] == cls.TABLE and len(cls.meta["table_name"]) > 1:
-            raise Exception(f"( {cls.__name__} ) table_name should not be more than one if init_type is table")
 
-        if cls.meta["init_type"] == cls.TABLE:
-            lack_inspector(cls.TABLE_META_REQUIRED)
-        elif cls.meta["init_type"] == cls.SCHEMA:
-            lack_inspector(cls.SCHEMA_META_REQUIRED)
-        else:
-            raise Exception(f"( {cls.__name__} ) Invalid init_type {cls.meta['init_type']}")
-        
     @classmethod
     def _conditional_init_inspector(cls):
         if cls.meta["conditional_init"]:
@@ -453,43 +517,120 @@ class PostgresModelHandler():
                     lack_list.append(key)
             if len(lack_list) > 0:
                 raise Exception(f"( {cls.__name__} ) Lack of conditional init method: {', '.join(lack_list)}")
+        else:
+            raise Exception(f"( {cls.__name__} ) conditional_init should be True")
 
     @classmethod
     def get_field_dict(cls) -> dict:
+        """
+        This is the method to get the field dictionary.
+
+        Returns:
+            field_dict (dict): The field dictionary.
+        """
         return {k: v for k, v in cls.__dict__.items() if isinstance(v, PostgresField)}
     
     @classmethod
     def get_field_conditions(cls) -> str:
+        """
+        This is the method to get the field conditions.
+
+        Returns:
+            sql conditions (string): The field conditions.
+        """
         return ', '.join(f"{k} {v}" for k, v in cls.__dict__.items() if isinstance(v, PostgresField))
 
     @classmethod
     def get_field_index_dict(cls) -> dict:
+        """
+        This is the method to get the index type of the headers.
+
+        Returns:
+            index_dict (dict): The index type of the headers.
+        """
         return {k: v.index_type for k, v in cls.__dict__.items() if isinstance(v, PostgresField) and v.index_type != ""}
 
     @classmethod
-    def get_herders(cls) -> list:
+    def get_headers(cls) -> list:
+        """
+        This is the method to get the headers.
+
+        Returns:
+            headers (list): The headers.
+        """
         return [k for k, v in cls.__dict__.items() if isinstance(v, PostgresField)]
 
     @classmethod
-    def get_required_herders(cls) -> list:
+    def get_required_headers(cls) -> list:
+        """
+        This is the method to get the required headers.
+
+        Returns:
+            required_headers (list): The required headers.
+        """
         return [k for k, v in cls.__dict__.items() if isinstance(v, PostgresField) and v.required]
 
     @classmethod
-    def get_herders_type(cls) -> dict:
+    def get_headers_type(cls) -> dict:
+        """
+        This is the method to get the headers type.
+
+        Returns:
+            dic (dict): The headers type.
+        """
         return {k: v.field_type for k, v in cls.__dict__.items() if isinstance(v, PostgresField)}
 
     @classmethod
-    def form_schema_sql(cls) -> str:
+    def get_headers_default(cls) -> dict:
+        """
+        This is the method to get the default value of the headers.
+
+        Returns:
+            dic (dict): The default value of a row in the table.
+
+        Limitation:
+            \- If the default value is "''", it will be changed to "".
+            \- If the default value is "ARRAY[]::", it will be changed to [].
+            \- If the field is serial and primary key, it will be ignored.
+        """
+        dic = {}
+        for k, v in cls.__dict__.items():
+            if isinstance(v, PostgresField):
+                if type(v.default) == str and v.default.startswith("ARRAY[]::"):
+                    dic[k] = []
+                elif v.serial and v.primary_key:
+                    pass
+                elif v.default == "''":
+                    dic[k] = ""
+                else:
+                    dic[k] = v.default
+        return dic
+    
+    @classmethod
+    def form_schema_sql(cls, inspect=True) -> str:
+        if inspect:
+            cls._meta_inspector()
         if cls.meta["init_type"] != cls.SCHEMA:
-            raise Exception("( {cls.__name__} ) Invalid init_type {cls.meta['init_type']})")
+            raise Exception(f"( {cls.__name__} ) Invalid init_type ( {cls.meta['init_type']} )")
         return f"""
         CREATE SCHEMA IF NOT EXISTS {cls.meta["schema_name"][0]} AUTHORIZATION {cls.meta["authorization"]};
         """
 
     @classmethod
-    def form_table_sql(cls) -> str:
+    def form_table_sql(cls, inspect=True) -> str:
+        """
+        This is the method to form the table sql command.
+
+        Args:
+            inspect (boolean, optional): Defaults to True. If True, the meta data will be inspected.
+        
+        Returns:
+            table_sql (string): The table sql command.
+        """
+        if inspect:
+            cls._meta_inspector()
         if cls.meta["init_type"] != cls.TABLE:
-            raise Exception("( {cls.__name__} ) Invalid init_type {cls.meta['init_type']})")
+            raise Exception(f"( {cls.__name__} ) Invalid init_type ( {cls.meta['init_type']} )")
         table_sql = ""
         for item in cls.meta["schema_name"]:
             table_sql += f"""
@@ -498,9 +639,21 @@ class PostgresModelHandler():
         return table_sql
 
     @classmethod
-    def form_table_conditional_sql(cls) -> str:
+    def form_table_conditional_sql(cls, inspect=True) -> str:
+        """
+        This is the method to form the table with conditional initialization sql command.
+        
+        Args:
+            inspect (boolean, optional): Defaults to True. If True, the meta data and conditional init method will be inspected.
+        
+        Returns:
+            table_sql (string): The table sql command.
+        """
+        if inspect:
+            cls._meta_inspector()
+            cls._conditional_init_inspector()
         if cls.meta["init_type"] != cls.TABLE:
-            raise Exception("( {cls.__name__} ) Invalid init_type {cls.meta['init_type']})")
+            raise Exception(f"( {cls.__name__} ) Invalid init_type ( {cls.meta['init_type']} )")
         table_sql = ""
         for item in cls.meta["schema_name"]:
             if_conditions = cls.if_initialize(schema_name=item, table_name=cls.meta["table_name"][0])
@@ -518,9 +671,20 @@ class PostgresModelHandler():
         return table_sql
 
     @classmethod
-    def form_index_sql(cls) -> str:
+    def form_index_sql(cls, inspect=True) -> str:
+        """
+        This is the method to form the index sql command.
+
+        Args:
+            inspect (boolean, optional): Defaults to True. If True, the meta data will be inspected.
+        
+        Returns:
+            index_sql (string): The index sql command.
+        """
+        if inspect:
+            cls._meta_inspector()
         if cls.meta["init_type"] != cls.TABLE:
-            raise Exception("( {cls.__name__} ) Invalid init_type {cls.meta['init_type']})")
+            raise Exception(f"( {cls.__name__} ) Invalid init_type ( {cls.meta['init_type']} )")
         index_sql = ""
         index_dict = cls.get_field_index_dict()
         for schema in cls.meta["schema_name"]:
@@ -536,22 +700,21 @@ class PostgresModelHandler():
         This is the method to create all the sql command, including schema, table, index.
         """
         cls._meta_inspector()
-        if cls.meta["conditional_init"]:
-            cls._conditional_init_inspector()
 
         if cls.meta["init_type"] == cls.TABLE:
             if cls.meta["conditional_init"]:
-                cls._table_entries_dict[cls.__name__] = cls.form_table_conditional_sql()
+                cls._conditional_init_inspector()
+                cls._table_entries_dict[cls.__name__] = cls.form_table_conditional_sql(inspect=False)
             else:
-                cls._table_entries_dict[cls.__name__] = cls.form_table_sql()
-            cls._index_entries_dict[cls.__name__] = cls.form_index_sql()
+                cls._table_entries_dict[cls.__name__] = cls.form_table_sql(inspect=False)
+            cls._index_entries_dict[cls.__name__] = cls.form_index_sql(inspect=False)
         elif cls.meta["init_type"]== cls.SCHEMA:
-            cls._schema_entries_dict[cls.__name__] = cls.form_schema_sql()
+            cls._schema_entries_dict[cls.__name__] = cls.form_schema_sql(inspect=False)
         else:
             raise Exception("Invalid meta type")
 
     @classmethod
-    def execute_sql(cls, postgres_handler: PostgresHandler, sql_cb: None):
+    def execute_sql(cls, postgres_handler: PostgresHandler, sql_cb=None):
         """
         This is the method to execute the sql command.
 
@@ -578,10 +741,15 @@ class PostgresModelHandler():
         cls._index_entries_dict = {}
 
     @classmethod
-    def if_initialize(self, schema_name, table_name):
+    def if_initialize(cls, schema_name, table_name):
         """
+        ** customized method **
         if_initialize is the method to form the conditional initialization sql command.
         If the table does not exist, the if_initialize will be executed.
+
+        Args:
+            schema_name (string): The schema name.
+            table_name (string): The table name.
 
         Example:
             return f"INSERT INTO {schema_name}.{table_name} (camera_ip, roi_id) VALUES ('10.0.0.123', 1);"
@@ -589,10 +757,15 @@ class PostgresModelHandler():
         pass
 
     @classmethod
-    def else_initialize(self, schema_name, table_name):
+    def else_initialize(cls, schema_name, table_name):
         """
+        ** customized method **
         else_initialize is the method to form the conditional initialization sql command.
-        If the table already exists, the else_initialize will be executed.
+        If the table already exists, the else_initialize will be executed.ｆ
+
+        Args:
+            schema_name (string): The schema name.
+            table_name (string): The table name.
 
         Example:
             return f"UPDATE {schema_name}.{table_name} SET camera_ip='10.0.0.124' WHERE roi_id=1;"
