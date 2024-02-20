@@ -1,7 +1,6 @@
 import mongoengine as mongo
 from pymongo.errors import ServerSelectionTimeoutError
 from pymongo import MongoClient
-import json
 import logging
 import datetime
 from bson import ObjectId
@@ -21,7 +20,7 @@ class MongoHandler:
             "schema_name": schema
         }
     """
-    def __init__(self, alias: str, host: int, port: str, database: str, username: str, password: str, schemas: str):
+    def __init__(self, alias: str, host: str, port: int, database: str, username: str, password: str, schemas: str):
         self.db_type = "mongo"
         self.alias = alias
         self.host = host
@@ -50,7 +49,6 @@ class MongoHandler:
             logging.warning(" [MongoHandler] Connect to MongoDB failed: \n{} ".format(e))
         except Exception as e:
             logging.warning(" [MongoHandler] Connect to MongoDB failed: \n{} ".format(e))
-
 
     def disconnect(self) -> None:
         mongo.disconnect(alias=self.alias)
@@ -94,15 +92,16 @@ class MongoHandler:
         self.disconnect()
         return {"indicator": indicator, "message": message, "data": data}
 
-    def get_data(self, schema_name: str, conditions={}, order_by_list=[]) -> dict:
+    def get_data(self, schema_name: str, conditions={}, order_by_list=[], ret_type="jsonable") -> dict:
         """
         Get data from MongoDB
         
         Args:
-            schema_name (str): name of schema
+            schema_name (str): name of schema (collection name in MongoDB)
             conditions (dict): conditions of query (follow MongoDB query syntax)
             order_by (list, optional): order by. + for ascending and - for descending. e.g. ["-modified_time"]. Defaults to [].
-
+            ret_type (str, optional): return type. Defaults to "jsonable". Should be one of ["jsonable", "original"].
+            
         Returns:
             dict: {
                 "indicator": bool,
@@ -153,22 +152,23 @@ class MongoHandler:
         try:
             indicator = True
             message = "Get data from MongoDB successfully"
-            data = self.__dict__[schema_name].get_data(conditions, order_by_list)
+            data = self.__dict__[schema_name].get_data(conditions, order_by_list, ret_type)
         except Exception as e:
             indicator = False
-            message = "[MongoHandler] Get data from MongoDB failed: \n{}".format(e)
+            message = "[MongoHandler] Get data from MongoDB failed: {}".format(e)
             data = []
             logging.warning(message)
         self.disconnect()
         return {"indicator": indicator, "message": message, "formatted_data": data}
     
-    def add_data(self, schema_name: str, input_data: list) -> dict:
+    def add_data(self, schema_name: str, input_data: list, ret_type="jsonable") -> dict:
         """
         Add data to MongoDB and return the data added
         
         Args:
             schema_name (str): name of schema
-            data (list of dict): data to add
+            input_data (list of dict): data to add
+            ret_type (str, optional): return type. Defaults to "jsonable". Should be one of ["jsonable", "original"].
 
         Returns:
             dict: {
@@ -181,16 +181,16 @@ class MongoHandler:
         try:
             indicator = True
             message = "Add data to MongoDB successfully"
-            data = self.__dict__[schema_name].add_data(input_data)
+            data = self.__dict__[schema_name].add_data(input_data, ret_type)
         except Exception as e:
             indicator = False
-            message = "[MongoHandler] Add data to MongoDB failed: \n{}".format(e)
+            message = "[MongoHandler] Add data to MongoDB failed: {}".format(e)
             data = []
             logging.warning(message)
         self.disconnect()
         return {"indicator": indicator, "message": message, "formatted_data": data}
     
-    def update_data(self, schema_name: str, conditions: dict, update_data: dict) -> dict:
+    def update_data(self, schema_name: str, conditions: dict, update_data: dict, ret_type="jsonable") -> dict:
         """
         Update data in MongoDB and return the data updated
         
@@ -198,6 +198,7 @@ class MongoHandler:
             schema_name (str): name of schema
             conditions (dict): conditions of query (follow MongoDB query syntax)
             update_data (dict): data to update
+            ret_type (str, optional): return type. Defaults to "jsonable". Should be one of ["jsonable", "original"].
         
         Returns:
             dict: {
@@ -210,10 +211,10 @@ class MongoHandler:
         try:
             indicator = True
             message = "Update data in MongoDB successfully"
-            data = self.__dict__[schema_name].update_data(conditions, update_data)
+            data = self.__dict__[schema_name].update_data(conditions, update_data, ret_type)
         except Exception as e:
             indicator = False
-            message = "[MongoHandler] Update data in MongoDB failed: \n{}".format(e)
+            message = "[MongoHandler] Update data in MongoDB failed: {}".format(e)
             data = []
             logging.warning(message)
         self.disconnect()
@@ -241,10 +242,10 @@ class MongoHandler:
             delete_count = self.__dict__[schema_name].delete_data(conditions)
             if "_id" in conditions:
                 conditions["_id"] = str(conditions["_id"])
-            data = {"deleted_count": delete_count, "conditions": conditions }
+            data = [{"deleted_count": delete_count, "conditions": conditions}]
         except Exception as e:
             indicator = False
-            message = "[MongoHandler] Delete data from MongoDB failed: \n{}".format(e)
+            message = "[MongoHandler] Delete data from MongoDB failed: {}".format(e)
             data = []
             logging.warning(message)
         self.disconnect()
@@ -252,16 +253,37 @@ class MongoHandler:
     
 class DocumentHandler(mongo.Document):
     meta = { "abstract": True}
+    _valid_ret_type_list = ["jsonable", "original"]
 
     @classmethod
-    def format_data(cls, mongo_obj):
-        return json.loads(mongo_obj.to_json())
+    def format_data(cls, mongo_obj, ret_type="jsonable"):
+        sub_item = mongo_obj.to_mongo().to_dict()
+        if ret_type not in cls._valid_ret_type_list:
+            raise ValueError("Invalid ret_type: {}".format(ret_type))
+        
+        if ret_type == "jsonable":
+            for key, value in sub_item.items():
+                if isinstance(value, ObjectId):
+                    sub_item[key] = str(value)
+                elif isinstance(value, datetime.datetime):
+                    sub_item[key] = value.timestamp()
+        return sub_item
 
     @classmethod
-    def format_data_list(cls, mongo_obj_list):
+    def format_data_list(cls, mongo_obj_list, ret_type="jsonable"):
         ret = []
+        if ret_type not in cls._valid_ret_type_list:
+            raise ValueError("Invalid ret_type: {}".format(ret_type))
+        
         for item in mongo_obj_list:
-            ret.append(json.loads(item.to_json()))
+            sub_item = item.to_mongo().to_dict()
+            if ret_type == "jsonable":
+                for key, value in sub_item.items():
+                    if isinstance(value, ObjectId):
+                        sub_item[key] = str(value)
+                    elif isinstance(value, datetime.datetime):
+                        sub_item[key] = value.timestamp()
+            ret.append()
         return ret
     
     @classmethod
@@ -284,30 +306,30 @@ class DocumentHandler(mongo.Document):
         return list(cls._fields_ordered)
 
     @classmethod
-    def add_data(cls, data):
+    def add_data(cls, data, ret_type="jsonable"):
         add_data = cls.format_and_validate_document(data)
         ret = cls.objects.insert(add_data)
-        return cls.format_data_list(ret)
+        return cls.format_data_list(ret, ret_type)
 
     @classmethod
-    def get_data(cls, conditions, order_by_list=[]):
+    def get_data(cls, conditions, order_by_list=[], ret_type="jsonable"):
         if conditions:
             if "_id" in conditions:
                 conditions["_id"] = ObjectId(conditions["_id"])
             raw_data = cls.objects(__raw__=conditions)
         else:
             raw_data = cls.objects
-        return cls.format_data_list(raw_data.order_by(*order_by_list))
+        return cls.format_data_list(raw_data.order_by(*order_by_list), ret_type)
     
     @classmethod
-    def update_data(cls, conditions, update_data):
+    def update_data(cls, conditions, update_data, ret_type="jsonable"):
         if conditions:
             if "_id" in conditions:
                 conditions["_id"] = ObjectId(conditions["_id"])
             raw_data = cls.objects(__raw__=conditions)
         else:
             raw_data = cls.objects
-        return cls.format_data(raw_data.modify(__raw__={"$set": update_data}, new=True))
+        return cls.format_data(raw_data.modify(__raw__={"$set": update_data}, new=True), ret_type)
     
     @classmethod
     def delete_data(cls, conditions):
@@ -332,6 +354,8 @@ class MongoWidget:
         username (str): username of MongoDB
         password (str): password of MongoDB
     """
+    _valid_ret_type_list = ["empty", "jsonable", "original"]
+
     def __init__(self, host: str, port: int, database: str, username: str, password: str) -> None:
         self.host = host
         self.port = port
@@ -371,7 +395,15 @@ class MongoWidget:
         """
         self.client.close()
     
-    def get_data(self, collection: str, conditions={}, order_by_list=[]) -> dict:
+    def form_jsonable_data(self, data_dict: dict) -> dict:
+        for key, value in data_dict.items():
+            if isinstance(value, ObjectId):
+                data_dict[key] = str(value)
+            elif isinstance(value, datetime.datetime):
+                data_dict[key] = value.timestamp()
+        return data_dict
+
+    def get_data(self, collection: str, conditions={}, order_by_list=[], ret_type="jsonable") -> dict:
         """
         Get data from MongoDB
         
@@ -381,6 +413,7 @@ class MongoWidget:
             order_by_list (list of tuple): order by. Elements of tuple are (key, order), 
                                            order is 1 for ascending and -1 for descending.
                                            e.g. [("modified_time", -1)]
+            ret_type (str, optional): return type. Defaults to "jsonable". Should be one of ["jsonable", "original"].
 
         Returns:
             dict: {
@@ -393,15 +426,133 @@ class MongoWidget:
         try:
             indicator = True
             message = "Get data from MongoDB successfully"
-            data = list(self.client[self.database][collection].find(conditions).sort(order_by_list))
+            if ret_type not in self.__class__._valid_ret_type_list:
+                raise ValueError("Invalid ret_type: {}".format(ret_type))
+            elif ret_type == "empty":
+                raise ValueError("ret_type cannot be 'empty' for get_data() function.")
+            
+            if order_by_list:
+                data = list(self.client[self.database][collection].find(conditions).sort(order_by_list))
+            else:
+                data = list(self.client[self.database][collection].find(conditions))
+
+            if ret_type == "jsonable":
+                for item in data:
+                    item = self.form_jsonable_data(item)
         except Exception as e:
             indicator = False
-            message = "[MongoHandler] Get data from MongoDB failed: \n{}".format(e)
+            message = "[MongoWidget] Get data from MongoDB failed: {}".format(e)
             data = []
             logging.warning(message)
         self.disconnect()
         return {"indicator": indicator, "message": message, "data": data}
+    
+    def _add_data(self, collection: str, data: list, ret_type="jsonable") -> dict:
+        """
+        Add data to MongoDB
         
+        Args:
+            collection (str): name of collection
+            data (list of dict): data to add
+
+        Returns:
+            dict: {
+                "indicator": bool,
+                "message": str,
+                "data": list
+            }
+        """
+        self.connect()
+        try:
+            indicator = True
+            message = "Add data to MongoDB successfully"
+            if ret_type not in self.__class__._valid_ret_type_list:
+                raise ValueError("Invalid ret_type: {}".format(ret_type))
+            
+            ret = self.client[self.database][collection].insert_many(data)
+
+            if ret_type == "empty":
+                ret = []
+            else:
+                condition_params = list(ret.inserted_ids)
+                ret = list(self.client[self.database][collection].find({"_id": {"$in": condition_params}}))
+                if ret_type == "jsonable":
+                    for item in ret:
+                        item = self.form_jsonable_data(item)
+        except Exception as e:
+            indicator = False
+            message = "[MongoWidget] Add data to MongoDB failed: {}".format(e)
+            ret = []
+            logging.warning(message)
+        self.disconnect()
+        return {"indicator": indicator, "message": message, "data": ret}
+
+    def _update_data(self, collection: str, conditions: dict, update_data: dict, ret_type="jsonable") -> dict:
+        """
+        Update data in MongoDB
+        
+        Args:
+            collection (str): name of collection
+            conditions (dict): conditions of query (follow MongoDB query syntax)
+            update_data (dict): data to update
+
+        Returns:
+            dict: {
+                "indicator": bool,
+                "message": str,
+                "data": list
+            }
+        """
+        self.connect()
+        try:
+            indicator = True
+            message = "Update data in MongoDB successfully"
+            if ret_type not in self.__class__._valid_ret_type_list:
+                raise ValueError("Invalid ret_type: {}".format(ret_type))
+            
+            ret = self.client[self.database][collection].update_many(conditions, {"$set": update_data})
+            if ret_type == "empty":
+                ret = []
+            else:
+                ret = list(self.client[self.database][collection].find(conditions))
+                if ret_type == "jsonable":
+                    for item in ret:
+                        item = self.form_jsonable_data(item)
+        except Exception as e:
+            indicator = False
+            message = "[MongoWidget] Update data in MongoDB failed: {}".format(e)
+            ret = []
+            logging.warning(message)
+        self.disconnect()
+        return {"indicator": indicator, "message": message, "data": ret}
+
+    def _delete_data(self, collection: str, conditions: dict):
+        """
+        Delete data from MongoDB
+        
+        Args:
+            collection (str): name of collection
+            conditions (dict): conditions of query (follow MongoDB query syntax)
+
+        Returns:
+            dict: {
+                "indicator": bool,
+                "message": str,
+                "data": list
+            }
+        """
+        self.connect()
+        try:
+            indicator = True
+            message = "Delete data from MongoDB successfully"
+            ret = [{"deleted_count": self.client[self.database][collection].delete_many(conditions).deleted_count, "conditions": conditions}]
+        except Exception as e:
+            indicator = False
+            message = "[MongoWidget] Delete data from MongoDB failed: {}".format(e)
+            ret = []
+            logging.warning(message)
+        self.disconnect()
+        return {"indicator": indicator, "message": message, "data": ret}
 
 # if __name__ == '__main__':
 #     # ========== MongoWidget Example ==========
