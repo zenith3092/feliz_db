@@ -283,7 +283,7 @@ class DocumentHandler(mongo.Document):
                         sub_item[key] = str(value)
                     elif isinstance(value, datetime.datetime):
                         sub_item[key] = value.timestamp()
-            ret.append()
+            ret.append(sub_item)
         return ret
     
     @classmethod
