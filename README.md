@@ -25,7 +25,7 @@ configs = {
     "host": "localhost",
     "port": 5432,
     "database": "postgres",
-    "username: "postgres",
+    "username": "postgres",
     "password": "postgres"
 }
 
@@ -168,7 +168,7 @@ configs = {
     "host": "localhost",
     "port": 5432,
     "database": "postgres",
-    "username: "postgres",
+    "username": "postgres",
     "password": "postgres"
 }
 DH = PostgresHandler(**configs)
