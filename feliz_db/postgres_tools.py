@@ -381,7 +381,7 @@ class PostgresHandler:
             logging.error(msg)
             return {"indicator": False, "message":msg}
 
-class PostgresModelHandler():
+class PostgresModelHandler:
     """
     This is the class to define the postgres model.
 

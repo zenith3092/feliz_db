@@ -5,6 +5,78 @@ import logging
 import datetime
 from bson import ObjectId
 
+class DocumentHandler(mongo.Document):
+    meta = { "abstract": True}
+
+    @classmethod
+    def format_data(cls, mongo_obj):
+        sub_item = mongo_obj.to_mongo().to_dict()
+        return sub_item
+
+    @classmethod
+    def format_data_list(cls, mongo_obj_list):
+        ret = []
+        for item in mongo_obj_list:
+            sub_item = item.to_mongo().to_dict()
+            ret.append(sub_item)
+        return ret
+    
+    @classmethod
+    def format_and_validate_document(cls, data):
+        ret = []
+        for item in data:
+            add_item = cls(**item)
+            add_item.validate()
+            ret.append(add_item)
+        return ret
+
+    @classmethod
+    def handle_modified_time(cls, data: list) -> list:
+        for item in data:
+            item["modified_time"] = datetime.datetime.now().strftime("%Y%m%d%H%M%S%f")[:-3]
+        return data
+
+    @classmethod
+    def get_headers(cls):
+        return list(cls._fields_ordered)
+
+    @classmethod
+    def add_data(cls, data):
+        add_data = cls.format_and_validate_document(data)
+        ret = cls.objects.insert(add_data)
+        return cls.format_data_list(ret)
+
+    @classmethod
+    def get_data(cls, conditions, order_by_list=[]):
+        if conditions:
+            if "_id" in conditions:
+                conditions["_id"] = ObjectId(conditions["_id"])
+            raw_data = cls.objects(__raw__=conditions)
+        else:
+            raw_data = cls.objects
+        return cls.format_data_list(raw_data.order_by(*order_by_list))
+    
+    @classmethod
+    def update_data(cls, conditions, update_data):
+        if conditions:
+            if "_id" in conditions:
+                conditions["_id"] = ObjectId(conditions["_id"])
+            raw_data = cls.objects(__raw__=conditions)
+        else:
+            raw_data = cls.objects
+        return cls.format_data(raw_data.modify(__raw__={"$set": update_data}, new=True))
+    
+    @classmethod
+    def delete_data(cls, conditions):
+        if conditions:
+            if "_id" in conditions:
+                conditions["_id"] = ObjectId(conditions["_id"])
+            raw_data = cls.objects(__raw__=conditions)
+        else:
+            raw_data = cls.objects
+        
+        return raw_data.delete()
+
 class MongoHandler:
     """
     MongoDB Handler
@@ -16,11 +88,11 @@ class MongoHandler:
         database (str): database of MongoDB
         username (str): username of MongoDB
         password (str): password of MongoDB
-        schemas (dict): {
-            "schema_name": schema
+        schemas (dict[str, DocumentHandler]): {
+            schema_name: schema
         }
     """
-    def __init__(self, alias: str, host: str, port: int, database: str, username: str, password: str, schemas: str):
+    def __init__(self, alias: str, host: str, port: int, database: str, username: str, password: str, schemas: dict[str, DocumentHandler], **kwargs):
         self.db_type = "mongo"
         self.alias = alias
         self.host = host
@@ -28,15 +100,21 @@ class MongoHandler:
         self.database = database
         self.username = username
         self.password = password
-        self.timeout = 5000 # ms
+        self.timeout = kwargs.get("timeout") if kwargs.get("timeout") else 5000
 
         if not logging.getLogger().hasHandlers():
             logging.basicConfig(level=logging.INFO)
         
-        self.create_schemas(schemas)
+        self._create_schemas(schemas)
         self.connect(first_time=True)
 
     def connect(self, first_time=False) -> None:
+        """
+        This function is used to connect to MongoDB
+
+        Args:
+            first_time (bool, optional): connect to MongoDB for the first time. Defaults to False.
+        """
         try:
             if first_time:
                 client = MongoClient(host=self.host, port=self.port, username=self.username, password=self.password, serverSelectionTimeoutMS=self.timeout)
@@ -51,15 +129,18 @@ class MongoHandler:
             logging.warning(" [MongoHandler] Connect to MongoDB failed: \n{} ".format(e))
 
     def disconnect(self) -> None:
+        """
+        This function is used to disconnect from MongoDB
+        """
         mongo.disconnect(alias=self.alias)
     
-    def create_schemas(self, schemas: dict) -> None:
+    def _create_schemas(self, schemas: dict[str, DocumentHandler]) -> None:
         """
         Create schemas
 
         Args:
             schemas (dict): {
-                "schema_name": schema
+                schema_name: schema
             }
         """
         for schema_name, schema in schemas.items():
@@ -76,7 +157,7 @@ class MongoHandler:
             dict: {
                 "indicator": bool,
                 "message": str,
-                "data": list
+                "formatted_data": list[dict]
             }
         """
         self.connect()
@@ -90,23 +171,22 @@ class MongoHandler:
             message = "[MongoHandler] Get headers from MongoDB failed: \n{}".format(e)
             logging.warning(message)
         self.disconnect()
-        return {"indicator": indicator, "message": message, "data": data}
+        return {"indicator": indicator, "message": message, "formatted_data": data}
 
-    def get_data(self, schema_name: str, conditions={}, order_by_list=[], ret_type="jsonable") -> dict:
+    def get_data(self, schema_name: str, conditions={}, order_by_list=[]) -> dict:
         """
         Get data from MongoDB
         
         Args:
             schema_name (str): name of schema (collection name in MongoDB)
             conditions (dict): conditions of query (follow MongoDB query syntax)
-            order_by (list, optional): order by. + for ascending and - for descending. e.g. ["-modified_time"]. Defaults to [].
-            ret_type (str, optional): return type. Defaults to "jsonable". Should be one of ["jsonable", "original"].
+            order_by_list (list, optional): order by. + for ascending and - for descending. e.g. ["-modified_time"]. Defaults to [].
             
         Returns:
             dict: {
                 "indicator": bool,
                 "message": str,
-                "formatted_data": list
+                "formatted_data": list[dict]
             }
         
         Operators(use "$" to represent the operator in conditions):
@@ -149,48 +229,55 @@ class MongoHandler:
             $nor can be replaced by $nin, e.g. {"$nor": [{"name": "John"}, {"name": "Peter"}]} can be replaced by {"name": {"$nin": ["John", "Peter"]}}
         """
         self.connect()
+
         try:
+            schema: DocumentHandler = self.__dict__[schema_name]
+
             indicator = True
             message = "Get data from MongoDB successfully"
-            data = self.__dict__[schema_name].get_data(conditions, order_by_list, ret_type)
+            data = schema.get_data(conditions, order_by_list)
         except Exception as e:
             indicator = False
             message = "[MongoHandler] Get data from MongoDB failed: {}".format(e)
             data = []
             logging.warning(message)
+        
         self.disconnect()
         return {"indicator": indicator, "message": message, "formatted_data": data}
     
-    def add_data(self, schema_name: str, input_data: list, ret_type="jsonable") -> dict:
+    def add_data(self, schema_name: str, input_data: list[dict]) -> dict:
         """
         Add data to MongoDB and return the data added
         
         Args:
             schema_name (str): name of schema
-            input_data (list of dict): data to add
-            ret_type (str, optional): return type. Defaults to "jsonable". Should be one of ["jsonable", "original"].
+            input_data (list[dict]): data to add
 
         Returns:
             dict: {
                 "indicator": bool,
                 "message": str,
-                "formatted_data": list
+                "formatted_data": list[dict]
             }
         """
         self.connect()
+
         try:
+            schema: DocumentHandler = self.__dict__[schema_name]
+
             indicator = True
             message = "Add data to MongoDB successfully"
-            data = self.__dict__[schema_name].add_data(input_data, ret_type)
+            data = schema.add_data(input_data)
         except Exception as e:
             indicator = False
             message = "[MongoHandler] Add data to MongoDB failed: {}".format(e)
             data = []
             logging.warning(message)
+        
         self.disconnect()
         return {"indicator": indicator, "message": message, "formatted_data": data}
     
-    def update_data(self, schema_name: str, conditions: dict, update_data: dict, ret_type="jsonable") -> dict:
+    def update_data(self, schema_name: str, conditions: dict, update_data: dict) -> dict:
         """
         Update data in MongoDB and return the data updated
         
@@ -198,7 +285,6 @@ class MongoHandler:
             schema_name (str): name of schema
             conditions (dict): conditions of query (follow MongoDB query syntax)
             update_data (dict): data to update
-            ret_type (str, optional): return type. Defaults to "jsonable". Should be one of ["jsonable", "original"].
         
         Returns:
             dict: {
@@ -208,15 +294,19 @@ class MongoHandler:
             }
         """
         self.connect()
+
         try:
+            schema: DocumentHandler = self.__dict__[schema_name]
+
             indicator = True
             message = "Update data in MongoDB successfully"
-            data = self.__dict__[schema_name].update_data(conditions, update_data, ret_type)
+            data = schema.update_data(conditions, update_data)
         except Exception as e:
             indicator = False
             message = "[MongoHandler] Update data in MongoDB failed: {}".format(e)
             data = []
             logging.warning(message)
+
         self.disconnect()
         return {"indicator": indicator, "message": message, "formatted_data": data}
     
@@ -236,111 +326,23 @@ class MongoHandler:
             }
         """
         self.connect()
+        
         try:
+            schema: DocumentHandler = self.__dict__[schema_name]
+
             indicator = True
             message = "Delete data from MongoDB successfully"
-            delete_count = self.__dict__[schema_name].delete_data(conditions)
-            if "_id" in conditions:
-                conditions["_id"] = str(conditions["_id"])
+            delete_count = schema.delete_data(conditions)
+
             data = [{"deleted_count": delete_count, "conditions": conditions}]
         except Exception as e:
             indicator = False
             message = "[MongoHandler] Delete data from MongoDB failed: {}".format(e)
             data = []
             logging.warning(message)
+        
         self.disconnect()
         return {"indicator": indicator, "message": message, "formatted_data": data}
-    
-class DocumentHandler(mongo.Document):
-    meta = { "abstract": True}
-    _valid_ret_type_list = ["jsonable", "original"]
-
-    @classmethod
-    def format_data(cls, mongo_obj, ret_type="jsonable"):
-        sub_item = mongo_obj.to_mongo().to_dict()
-        if ret_type not in cls._valid_ret_type_list:
-            raise ValueError("Invalid ret_type: {}".format(ret_type))
-        
-        if ret_type == "jsonable":
-            for key, value in sub_item.items():
-                if isinstance(value, ObjectId):
-                    sub_item[key] = str(value)
-                elif isinstance(value, datetime.datetime):
-                    sub_item[key] = value.timestamp()
-        return sub_item
-
-    @classmethod
-    def format_data_list(cls, mongo_obj_list, ret_type="jsonable"):
-        ret = []
-        if ret_type not in cls._valid_ret_type_list:
-            raise ValueError("Invalid ret_type: {}".format(ret_type))
-        
-        for item in mongo_obj_list:
-            sub_item = item.to_mongo().to_dict()
-            if ret_type == "jsonable":
-                for key, value in sub_item.items():
-                    if isinstance(value, ObjectId):
-                        sub_item[key] = str(value)
-                    elif isinstance(value, datetime.datetime):
-                        sub_item[key] = value.timestamp()
-            ret.append(sub_item)
-        return ret
-    
-    @classmethod
-    def format_and_validate_document(cls, data):
-        ret = []
-        for item in data:
-            add_item = cls(**item)
-            add_item.validate()
-            ret.append(add_item)
-        return ret
-
-    @classmethod
-    def handle_modified_time(cls, data: list) -> list:
-        for item in data:
-            item["modified_time"] = datetime.datetime.now().strftime("%Y%m%d%H%M%S%f")[:-3]
-        return data
-
-    @classmethod
-    def get_headers(cls):
-        return list(cls._fields_ordered)
-
-    @classmethod
-    def add_data(cls, data, ret_type="jsonable"):
-        add_data = cls.format_and_validate_document(data)
-        ret = cls.objects.insert(add_data)
-        return cls.format_data_list(ret, ret_type)
-
-    @classmethod
-    def get_data(cls, conditions, order_by_list=[], ret_type="jsonable"):
-        if conditions:
-            if "_id" in conditions:
-                conditions["_id"] = ObjectId(conditions["_id"])
-            raw_data = cls.objects(__raw__=conditions)
-        else:
-            raw_data = cls.objects
-        return cls.format_data_list(raw_data.order_by(*order_by_list), ret_type)
-    
-    @classmethod
-    def update_data(cls, conditions, update_data, ret_type="jsonable"):
-        if conditions:
-            if "_id" in conditions:
-                conditions["_id"] = ObjectId(conditions["_id"])
-            raw_data = cls.objects(__raw__=conditions)
-        else:
-            raw_data = cls.objects
-        return cls.format_data(raw_data.modify(__raw__={"$set": update_data}, new=True), ret_type)
-    
-    @classmethod
-    def delete_data(cls, conditions):
-        if conditions:
-            if "_id" in conditions:
-                conditions["_id"] = ObjectId(conditions["_id"])
-            raw_data = cls.objects(__raw__=conditions)
-        else:
-            raw_data = cls.objects
-        
-        return raw_data.delete()
 
 class MongoWidget:
     """
@@ -419,7 +421,7 @@ class MongoWidget:
             dict: {
                 "indicator": bool,
                 "message": str,
-                "data": list
+                "data": list[dict]
             }
         """
         self.connect()
@@ -447,22 +449,23 @@ class MongoWidget:
         self.disconnect()
         return {"indicator": indicator, "message": message, "data": data}
     
-    def _add_data(self, collection: str, data: list, ret_type="jsonable") -> dict:
+    def _add_data(self, collection: str, data: list[dict], ret_type="jsonable") -> dict:
         """
         Add data to MongoDB
         
         Args:
             collection (str): name of collection
-            data (list of dict): data to add
+            data (list[dict]): data to add
 
         Returns:
             dict: {
                 "indicator": bool,
                 "message": str,
-                "data": list
+                "data": list[dict]
             }
         """
         self.connect()
+
         try:
             indicator = True
             message = "Add data to MongoDB successfully"
@@ -484,6 +487,7 @@ class MongoWidget:
             message = "[MongoWidget] Add data to MongoDB failed: {}".format(e)
             ret = []
             logging.warning(message)
+        
         self.disconnect()
         return {"indicator": indicator, "message": message, "data": ret}
 
@@ -504,6 +508,7 @@ class MongoWidget:
             }
         """
         self.connect()
+
         try:
             indicator = True
             message = "Update data in MongoDB successfully"
@@ -523,6 +528,7 @@ class MongoWidget:
             message = "[MongoWidget] Update data in MongoDB failed: {}".format(e)
             ret = []
             logging.warning(message)
+        
         self.disconnect()
         return {"indicator": indicator, "message": message, "data": ret}
 
@@ -542,6 +548,7 @@ class MongoWidget:
             }
         """
         self.connect()
+
         try:
             indicator = True
             message = "Delete data from MongoDB successfully"
@@ -551,6 +558,7 @@ class MongoWidget:
             message = "[MongoWidget] Delete data from MongoDB failed: {}".format(e)
             ret = []
             logging.warning(message)
+        
         self.disconnect()
         return {"indicator": indicator, "message": message, "data": ret}
 
@@ -589,10 +597,10 @@ class MongoWidget:
     # configs = {
     #             "alias": "trigger",
     #             "host": "localhost",
-    #             "port": 48763,
+    #             "port": 5445,
     #             "database": "trigger",
     #             "username": "test",
-    #             "password": "mongodb",
+    #             "password": "test",
     #             "schemas": {"user": User}
     #           }
     # mh = MongoHandler(**configs)
@@ -600,10 +608,10 @@ class MongoWidget:
     # # Get Data
 
     # conditions = {"update_state": False, "favorite": {"$elemMatch": {"title": "react"}}}
-    # order_by_list = [("-modified_time")]
+    # order_by_list = ["-modified_time"]
     # res = mh.get_data("user", conditions, order_by_list)
     # if res["indicator"]:
-    #     print(res["data"])
+    #     print(res["formatted_data"])
     # else:
     #     print(res["message"])
     
@@ -621,7 +629,7 @@ class MongoWidget:
 #             }]
 #     res = mh.add_data("user", data)
 #     if res["indicator"]:
-#         print(res["data"])
+#         print(res["formatted_data"])
 #     else:
 #         print(res["message"])
     
@@ -631,7 +639,7 @@ class MongoWidget:
 #     update_data =  {"update_state": True}
 #     res = mh.update_data("user", update_query, update_data)
 #     if res["indicator"]:
-#         print(res["data"])
+#         print(res["formatted_data"])
 #     else:
 #         print(res["message"])
     
@@ -640,6 +648,6 @@ class MongoWidget:
 #     delete_query = {"account_id": "charlie_sysadmin"}
 #     res = mh.delete_data("user", delete_query)
 #     if res["indicator"]:
-#         print(res["data"])
+#         print(res["formatted_data"])
 #     else:
 #         print(res["message"])
