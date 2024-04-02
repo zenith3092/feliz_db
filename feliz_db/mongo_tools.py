@@ -405,7 +405,7 @@ class MongoWidget:
                 data_dict[key] = value.timestamp()
         return data_dict
 
-    def get_data(self, collection: str, conditions={}, order_by_list=[], ret_type="jsonable") -> dict:
+    def get_data(self, collection: str, conditions={}, order_by_list=[], ret_type="original") -> dict:
         """
         Get data from MongoDB
         
@@ -415,7 +415,7 @@ class MongoWidget:
             order_by_list (list of tuple): order by. Elements of tuple are (key, order), 
                                            order is 1 for ascending and -1 for descending.
                                            e.g. [("modified_time", -1)]
-            ret_type (str, optional): return type. Defaults to "jsonable". Should be one of ["jsonable", "original"].
+            ret_type (str, optional): return type. Defaults to "original". Should be one of ["jsonable", "original"].
 
         Returns:
             dict: {
@@ -449,13 +449,14 @@ class MongoWidget:
         self.disconnect()
         return {"indicator": indicator, "message": message, "data": data}
     
-    def _add_data(self, collection: str, data: list[dict], ret_type="jsonable") -> dict:
+    def _add_data(self, collection: str, data: list[dict], ret_type="original") -> dict:
         """
         Add data to MongoDB
         
         Args:
             collection (str): name of collection
             data (list[dict]): data to add
+            ret_type (str, optional): return type. Defaults to "original". Should be one of ["empty", "jsonable", "original"].
 
         Returns:
             dict: {
@@ -491,7 +492,7 @@ class MongoWidget:
         self.disconnect()
         return {"indicator": indicator, "message": message, "data": ret}
 
-    def _update_data(self, collection: str, conditions: dict, update_data: dict, ret_type="jsonable") -> dict:
+    def _update_data(self, collection: str, conditions: dict, update_data: dict, ret_type="original") -> dict:
         """
         Update data in MongoDB
         
@@ -499,6 +500,7 @@ class MongoWidget:
             collection (str): name of collection
             conditions (dict): conditions of query (follow MongoDB query syntax)
             update_data (dict): data to update
+            ret_type (str, optional): return type. Defaults to "original". Should be one of ["empty", "jsonable", "original"].
 
         Returns:
             dict: {
