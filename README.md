@@ -12,11 +12,11 @@ An ODM / ORM designed to assist in querying data from some kinds of database
 pip3 install feliz_db
 ```
 
-## Postgres Tools
+# Postgres Tools
 
-### PostgresHandler
+## PostgresHandler
 
-#### Initialization
+### Initialization
 
 ```python
 from feliz_db.postgres_tools import PostgresHandler
@@ -41,21 +41,21 @@ All methods will return a dictionary with the following keys:
 - data: The data of the operation. It will be a list of tuples.
 - formatted_data: The formatted data of the operation. It will be a list of dictionaries.
 
-#### Add data
+### Add data
 
 ```python
 adding_list = [{"column_name": "value"}]
 add_res = DH.add_data(table="table_name", adding_list=adding_list)
 ```
 
-#### Get data
+### Get data
 
 ```python
 conditions = [("column_name =", "value")]
 get_res = DH.get_data(table="table_name", conditional_rule_list=conditions)
 ```
 
-#### Update data
+### Update data
 
 ```python
 update_list = [{"_id": 1,"column_name": "value1"},
@@ -63,7 +63,7 @@ update_list = [{"_id": 1,"column_name": "value1"},
 update_res = DH.update_data(table="table_name",editing_list=update_list, reference_column_list=["_id"])
 ```
 
-#### Delete data
+### Delete data
 
 ```python
 delete_list = [{"_id": 1},
@@ -71,9 +71,9 @@ delete_list = [{"_id": 1},
 delete_res = DH.delete_data(table="table_name", filter_list=delete_list, reference_column_list=["_id"])
 ```
 
-### PostgresModelHandler & PostgresField
+## PostgresModelHandler & PostgresField
 
-#### Define a schema model
+### Define a schema model
 
 User can create a model by inheriting the `PostgresModelHandler` class and defining the fields by `PostgresField` class.
 
@@ -88,7 +88,7 @@ class TestSchema(PostgresModelHandler):
     }
 ```
 
-#### Create a schema
+### Create a schema
 
 ```python
 configs = {
@@ -104,7 +104,7 @@ DH = PostgresHandler(**configs)
 TestSchema.execute_sql(DH, TestSchema.form_schema_sql)
 ```
 
-#### Define a table model
+### Define a table model
 
 User can create a model by inheriting the `PostgresModelHandler` class and defining the fields by `PostgresField` class.
 
@@ -139,7 +139,7 @@ class UserListTable(PostgresModelHandler):
         return ""
 ```
 
-#### Create a table
+### Create a table
 
 ```python
 configs = {
@@ -155,7 +155,7 @@ DH = PostgresHandler(**configs)
 UserListTable.execute_sql(DH, UserListTable.form_table_conditional_sql)
 ```
 
-#### Multiple create schema and table
+### Multiple create schema and table
 
 All models should execute the `create_sql` method and then use any model to execute the `execute_sql` method to create the schema and table.
 
@@ -179,9 +179,9 @@ UserListTable.execute_sql(DH)
 UserListTable.clear_sql()
 ```
 
-## Mongo Tools
+# Mongo Tools
 
-### DocumentHandler
+## DocumentHandler
 
 DocumentHandler is a class that can be used to define a schema and table for a MongoDB database. The user can create a model by inheriting the `DocumentHandler` class and defining the fields by the `mongoengine` class.
 
@@ -215,9 +215,9 @@ class ConfigCameras(DocumentHandler):
     meta = {"db_alias": "dt_config", "collection": "cameras"}
 ```
 
-### MongoHandler
+## MongoHandler
 
-#### Initialization
+### Initialization
 
 ```python
 from feliz_db.mongo_tools import MongoHandler
@@ -242,31 +242,31 @@ All methods will return a dictionary with the following keys:
 - message: The message of the operation. It will be a string.
 - formatted_data: The formatted data of the operation. It will be a list of dictionaries.
 
-#### Add data
+### Add data
 
 ```python
 add_res = DH.add_data("cameras", [{...}, {...}])
 ```
 
-#### Get data
+### Get data
 
 ```python
 get_res = DH.get_data("cameras", {"rtsp.username": "admin"})
 ```
 
-#### Update data
+### Update data
 
 ```python
 update_res = MH.update_data("cameras", {"item_id": "123"}, {"item_name": "ABC"})
 ```
 
-#### Delete data
+### Delete data
 
 ```python
 delete_res = MH.delete_data("cameras", {"item_id": "123"})
 ```
 
-### MongoWidget
+## MongoWidget
 
 MongoWidget is a class that can be used to query data from a MongoDB database. The user can use the `get_data` method to query data from a collection.
 
