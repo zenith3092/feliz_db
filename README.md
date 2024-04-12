@@ -4,12 +4,12 @@ An ODM / ORM designed to assist in querying data from some kinds of database
 
 ## Environment
 
-- Python 3.9 or higher
+-   Python 3.9 or higher
 
 ## Installation
 
 ```bash
-pip3 install feliz_db
+pip install feliz_db
 ```
 
 # Postgres Tools
@@ -36,10 +36,10 @@ Users can use the `add_data`, `get_data`, `update_data`, and `delete_data` metho
 
 All methods will return a dictionary with the following keys:
 
-- indicator: The indicator of the operation. It will be `True` if the operation is successful, otherwise it will be `False`.
-- message: The message of the operation. It will be a string.
-- data: The data of the operation. It will be a list of tuples.
-- formatted_data: The formatted data of the operation. It will be a list of dictionaries.
+-   indicator: The indicator of the operation. It will be `True` if the operation is successful, otherwise it will be `False`.
+-   message: The message of the operation. It will be a string.
+-   data: The data of the operation. It will be a list of tuples.
+-   formatted_data: The formatted data of the operation. It will be a list of dictionaries.
 
 ### Add data
 
@@ -238,9 +238,9 @@ MongoHandler will automatically create the model and then users can use the `add
 
 All methods will return a dictionary with the following keys:
 
-- indicator: The indicator of the operation. It will be `True` if the operation is successful, otherwise it will be `False`.
-- message: The message of the operation. It will be a string.
-- formatted_data: The formatted data of the operation. It will be a list of dictionaries.
+-   indicator: The indicator of the operation. It will be `True` if the operation is successful, otherwise it will be `False`.
+-   message: The message of the operation. It will be a string.
+-   formatted_data: The formatted data of the operation. It will be a list of dictionaries.
 
 ### Add data
 
