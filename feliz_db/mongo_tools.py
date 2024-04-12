@@ -629,6 +629,3 @@ class MongoWidget:
         
         self.disconnect()
         return {"indicator": indicator, "message": message, "formatted_data": ret}
-
-conditions = {"_id": {"$in": ["123456123456123456123456", "789012789012789012789012"]}}
-print(DocumentHandler._process_id_condition(conditions))
