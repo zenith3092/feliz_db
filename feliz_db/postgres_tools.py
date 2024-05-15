@@ -786,9 +786,10 @@ class PostgresField:
         check (string, optional): Defaults to "".
         generated_as (string, optional): Defaults to "".
         index_type (string, optional): Defaults to "". (e.g. BTREE, HASH, GIST, GIN, BRIN, SPGIST)
+        customized_sql (string, optional): Defaults to "".
     """
     def __init__(self, field_type="", required=False, default=None, serial=False, primary_key=False,
-                       unique=False, check="", generated_as="", index_type=""):
+                       unique=False, check="", generated_as="", index_type="", customized_sql=""):
         self.field_type = field_type
         self.default = default
         self.required = required
@@ -798,9 +799,10 @@ class PostgresField:
         self.check = check
         self.generated_as = generated_as
         self.index_type = index_type
+        self.customized_sql = customized_sql
     
     def __str__(self):
-        return f"{self.field_type.upper()}{self.get_default()}{self.get_required()}{self.get_serial()}{self.get_primary_key()}{self.get_unique()}{self.get_check()}{self.get_generated_as()}"
+        return f"{self.field_type.upper()}{self.get_default()}{self.get_required()}{self.get_serial()}{self.get_primary_key()}{self.get_unique()}{self.get_check()}{self.get_generated_as()}{self.get_customized_sql()}"
 
     def get_default(self):
         return f" DEFAULT {self.default}" if self.default is not None else ""
@@ -822,6 +824,9 @@ class PostgresField:
 
     def get_generated_as(self):
         return f" GENERATED ALWAYS AS ({self.generated_as}) STORED" if self.generated_as else ""
+    
+    def get_customized_sql(self):
+        return f" {self.customized_sql}" if self.customized_sql else ""
 
 # if __name__ == "__main__":
 #     ph = PostgresHandler("10.0.0.32", 5432, "postgres", "postgres", "1234") # should print "Connection with database is OK"

@@ -82,9 +82,10 @@ from feliz_db.postgres_tools import PostgresModelHandler
 
 class TestSchema(PostgresModelHandler):
     meta = {"initialize": True,
-            "conditional_init": True,
+            "conditional_init": False,
             "init_type": "schema",
-            "schema_name": ["test"]
+            "schema_name": ["test"],
+            "authorization": "user"
     }
 ```
 
