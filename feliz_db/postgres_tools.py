@@ -156,9 +156,9 @@ class PostgresHandler:
                 schema, table = table_info[0], table_info[1]
             else:
                 schema, table = 'public', table_name
-            sql_cmd = "SELECT column_name FROM information_schema.columns"
+            sql_cmd = "SELECT column_name FROM information_schema.columns WHERE (table_schema = '{}') AND (table_name = '{}')".format(schema, table)
             if no_ser_pk:
-                sql_cmd += " WHERE (table_schema = '{}') AND (table_name = '{}') AND (column_default NOT LIKE 'nextval%' OR column_default IS NULL)".format(schema, table)
+                sql_cmd += "  AND (column_default NOT LIKE 'nextval%' OR column_default IS NULL) AND (generation_expression IS NULL)"
             result = self._execute_sql(db_operation_mode.MODE_DB_W_RETURN_WO_ARGS, "{};".format(sql_cmd))
             return [item[0] for item in result["data"]]
 
