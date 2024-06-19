@@ -469,6 +469,7 @@ class PostgresModelHandler:
             for key in row:
                 if key in fields:
                     setattr(new_obj, key, row[key])
+            ret_list.append(new_obj)
         return ret_list
 
     @classmethod
@@ -671,12 +672,13 @@ class PostgresModelHandler:
         return table_sql
 
     @classmethod
-    def form_index_sql(cls, inspect=True) -> str:
+    def form_index_sql(cls, inspect=True, prefix="idx_") -> str:
         """
         This is the method to form the index sql command.
 
         Args:
             inspect (boolean, optional): Defaults to True. If True, the meta data will be inspected.
+            prefix (string, optional): Defaults to "idx_". The prefix of the index name.
         
         Returns:
             index_sql (string): The index sql command.
@@ -690,7 +692,7 @@ class PostgresModelHandler:
         for schema in cls.meta["schema_name"]:
             for column, index_method in index_dict.items():
                 index_sql += f"""
-                CREATE INDEX IF NOT EXISTS idx_{column} ON {schema}.{cls.meta["table_name"][0]} USING {index_method.upper()} ({column});
+                CREATE INDEX IF NOT EXISTS {prefix}{column} ON {schema}.{cls.meta["table_name"][0]} USING {index_method.upper()} ({column});
                 """
         return index_sql
 

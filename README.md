@@ -58,8 +58,8 @@ get_res = DH.get_data(table="table_name", conditional_rule_list=conditions)
 ### Update data
 
 ```python
-update_list = [{"_id": 1,"column_name": "value1"},
-               {"_id": 2,"column_name": "value2"}]
+update_list = [{"_id": 1, "column_name": "value1"},
+               {"_id": 2, "column_name": "value2"}]
 update_res = DH.update_data(table="table_name",editing_list=update_list, reference_column_list=["_id"])
 ```
 
@@ -96,7 +96,7 @@ configs = {
     "host": "localhost",
     "port": 5432,
     "database": "postgres",
-    "username: "postgres",
+    "username": "postgres",
     "password": "postgres"
 }
 
