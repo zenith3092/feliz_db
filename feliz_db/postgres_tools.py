@@ -712,9 +712,6 @@ class PostgresModelHandler(metaclass=PostgresMeta):
     def form_table_sql(cls) -> str:
         """
         This is the method to form the table sql command.
-
-        Args:
-            inspect (boolean, optional): Defaults to True. If True, the meta data will be inspected.
         
         Returns:
             table_sql (string): The table sql command.
@@ -734,9 +731,6 @@ class PostgresModelHandler(metaclass=PostgresMeta):
     def form_table_conditional_sql(cls) -> str:
         """
         This is the method to form the table with conditional initialization sql command.
-        
-        Args:
-            inspect (boolean, optional): Defaults to True. If True, the meta data and conditional init method will be inspected.
         
         Returns:
             table_sql (string): The table sql command.
@@ -766,7 +760,6 @@ class PostgresModelHandler(metaclass=PostgresMeta):
         This is the method to form the index sql command.
 
         Args:
-            inspect (boolean, optional): Defaults to True. If True, the meta data will be inspected.
             prefix (string, optional): Defaults to "idx_". The prefix of the index name.
         
         Returns:
@@ -793,7 +786,6 @@ class PostgresModelHandler(metaclass=PostgresMeta):
         This is the method to form the enum sql command.
 
         Args:
-            inspect (boolean, optional): Defaults to True. If True, the meta data will be inspected.
         
         Returns:
             enum_sql (string): The enum sql command.
@@ -935,17 +927,6 @@ class PostgresField:
     
     def get_customized_sql(self):
         return f" {self.customized_sql}" if self.customized_sql else ""
-
-class TestEnum(PostgresModelHandler):
-    A = PostgresEnum(1)
-    B = PostgresEnum(2)
-    C = 123
-
-    meta = {
-        "initialize": True,
-        "init_type": "enum",
-        "enum_name": ["test"]
-    }
 
 # if __name__ == "__main__":
 #     ph = PostgresHandler("10.0.0.32", 5432, "postgres", "postgres", "1234") # should print "Connection with database is OK"
