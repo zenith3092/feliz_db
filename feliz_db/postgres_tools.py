@@ -1,21 +1,31 @@
 import psycopg2  
 import logging, traceback
 from enum import Enum
+from collections import OrderedDict
 
 class PostgresEnum:
     """
     This is the class to define the postgres enum.
 
     Args:
-        value (string): The value of the enum.
-        key (string, optional): Defaults to None. The key of the enum.
+        value (str): The value of the enum.
     """
-    def __init__(self, value, key=None) -> None:
+    def __init__(self, value) -> None:
+        self.key = ""
+        self.source = ""
+
+        if type(value) != str:
+            raise TypeError(f"Invalid type of value: {type(value)}")
         self.value = value
-        self.key = key
 
     def __repr__(self):
-        return f"PostgresEnum({self.value})"
+        return f"PostgresEnum({self.source}, {self.value})"
+
+class UniqueEnumKeyDict(OrderedDict):
+    def __setitem__(self, key, value):
+        if key in self and isinstance(self[key], PostgresEnum):
+            raise ValueError(f"Duplicate enum key: {key}")
+        super().__setitem__(key, value)
 
 class PostgresMeta(type):
     META_REQUIRED = ["init_type"]
@@ -31,18 +41,21 @@ class PostgresMeta(type):
             if key not in meta:
                 lack_list.append(key)
         if len(lack_list) > 0:
-            raise Exception(f"( {name} ) Lack of meta: {', '.join(lack_list)}")
-
-    def __contains__(cls, item):
-        return any(item == value for value in cls)
+            raise ValueError(f"( {name} ) Lack of meta: {', '.join(lack_list)}")
     
-    def __iter__(cls):
-        return (value for key, value in cls.__dict__.items() if isinstance(value, PostgresEnum))
-    
-    def __new__(cls, name, bases, classdict):
-        new_class = super().__new__(cls, name, bases, classdict)
+    @classmethod
+    def __prepare__(metacls, name, bases):
+        return UniqueEnumKeyDict()
 
-        cls.INIT_TYPE = new_class.INIT_TYPE
+    def __contains__(metacls, item):
+        return any(item == value for value in metacls)
+    
+    def __iter__(metacls):
+        return (value for key, value in metacls.__dict__.items() if isinstance(value, PostgresEnum))
+        
+    def __new__(metacls, name, bases, classdict):
+        new_class = super().__new__(metacls, name, bases, classdict)
+        metacls.INIT_TYPE = new_class.INIT_TYPE
         
         merged_meta = {}
         for base in bases:
@@ -57,10 +70,10 @@ class PostgresMeta(type):
             conditional_init = merged_meta.get("conditional_init", False)
             
             if init_type == None:
-                raise Exception(f"( {name} ) No define init_type in meta")
+                raise ValueError(f"( {name} ) No define init_type in meta")
             else:
-                if init_type == cls.INIT_TYPE["TABLE"]:
-                    cls.lack_inspector(name, merged_meta, cls.TABLE_META_REQUIRED)
+                if init_type == metacls.INIT_TYPE["TABLE"]:
+                    metacls.lack_inspector(name, merged_meta, metacls.TABLE_META_REQUIRED)
 
                     schema_name = merged_meta["schema_name"]
                     table_name = merged_meta["table_name"]
@@ -69,44 +82,64 @@ class PostgresMeta(type):
                         merged_meta["schema_name"] = [schema_name]
                     elif type(schema_name) == list:
                         if len(schema_name) == 0:
-                            raise Exception(f"( {name} ) schema_name should not be empty")
+                            raise ValueError(f"( {name} ) schema_name should not be empty")
                     else:
-                        raise Exception(f"( {name} ) schema_name should be string or list")
+                        raise TypeError(f"( {name} ) schema_name should be string or list")
 
                     if type(table_name) == str:
                         merged_meta["table_name"] = [table_name]
                     elif type(table_name) == list:
                         if len(table_name) == 0:
-                            raise Exception(f"( {name} ) table_name should not be empty if init_type is table")
+                            raise ValueError(f"( {name} ) table_name should not be empty if init_type is table")
                         elif len(table_name) > 1:
-                            raise Exception(f"( {name} ) table_name should not be more than one")
+                            raise ValueError(f"( {name} ) table_name should not be more than one")
                     else:
-                        raise Exception(f"( {name} ) table_name should be string or list")
-                elif init_type == cls.INIT_TYPE["SCHEMA"]:
-                    cls.lack_inspector(name, merged_meta, cls.SCHEMA_META_REQUIRED)
+                        raise TypeError(f"( {name} ) table_name should be string or list")
+                elif init_type == metacls.INIT_TYPE["SCHEMA"]:
+                    metacls.lack_inspector(name, merged_meta, metacls.SCHEMA_META_REQUIRED)
 
                     schema_name = merged_meta["schema_name"]
                     if type(schema_name) == str:
                         merged_meta["schema_name"] = [schema_name]
                     elif type(schema_name) == list:
                         if len(schema_name) == 0:
-                            raise Exception(f"( {name} ) schema_name should not be empty")
+                            raise ValueError(f"( {name} ) schema_name should not be empty")
                     else:
-                        raise Exception(f"( {name} ) schema_name should be string or list")
-                elif init_type == cls.INIT_TYPE["ENUM"]:
-                    cls.lack_inspector(name, merged_meta, cls.ENUM_META_REQUIRED)
+                        raise TypeError(f"( {name} ) schema_name should be string or list")
+                elif init_type == metacls.INIT_TYPE["ENUM"]:
+                    enum_name = merged_meta["enum_name"]
 
+                    if type(enum_name) == str:
+                        merged_meta["enum_name"] = [enum_name]
+                    elif type(enum_name) == list:
+                        if len(enum_name) == 0:
+                            raise ValueError(f"( {name} ) enum_name should not be empty")
+                        elif len(enum_name) > 1:
+                            raise ValueError(f"( {name} ) enum_name should be only one")
+                    else:
+                        raise TypeError(f"( {name} ) enum_name should be string or list")
+
+                    metacls.lack_inspector(name, merged_meta, metacls.ENUM_META_REQUIRED)
+                    enum_keys = set()
+                    enum_values = set()
                     for key, value in classdict.items():
                         if isinstance(value, PostgresEnum):
+                            if key in enum_keys:
+                                raise ValueError(f"Duplicate enum value: {key}")
+                            if value.value in enum_values:
+                                raise ValueError(f"Duplicate enum value: {value.value}")
+                            enum_keys.add(key)
+                            enum_values.add(value.value)
                             value.key = key
+                            value.source = name
                 else:
-                    raise Exception(f"( {name} ) Invalid init_type {init_type}")
+                    raise ValueError(f"( {name} ) Invalid init_type {init_type}")
             
             if conditional_init:
-                for key in cls.CONDITIONAL_INIT_REQUIRED:
+                for key in metacls.CONDITIONAL_INIT_REQUIRED:
                     classdict[key] = classdict[key] if key in classdict else None
                     if classdict[key] == None:
-                        raise Exception(f"( {name} ) You should define class method '{key}' because you set conditional_init as True")
+                        raise NotImplementedError(f"( {name} ) You should define class method '{key}' because you set conditional_init as True")
 
             new_class.meta = merged_meta
         return new_class
@@ -127,7 +160,17 @@ class db_operation_mode(Enum):
     MODE_DB_W_RETURN_AND_ARGS = 3
 
 class PostgresHandler:
-    def __init__(self, host, port, database, username, password):
+    """
+    PostgresHandler is the class to handle the postgres database.
+
+    Args:
+        host (str): The host of the database.
+        port (int): The port of the database.
+        database (str): The database name.
+        username (str): The username of the database.
+        password (str): The password of the database.
+    """
+    def __init__(self, host: str, port: int, database: str, username: str, password: str):
         self.db_type = "postgres"
         self.host = host
         self.port = port
@@ -154,7 +197,7 @@ class PostgresHandler:
 
     def _execute_sql(self, mode, sql, entries=[], multiple=False, statement_timeout=-1):
         """
-        This is the functiino to execute sql command.
+        This is the function to execute sql command.
         If there are many data to insert/update, let the type of entries be list of list of args and set the param multiple to True,
         and then executemany will be called. 
 
@@ -164,7 +207,7 @@ class PostgresHandler:
             entries (list of args OR list of list of args, optional): The SQL args to execute. Defaults to [].
                 type of entries == list of args means the sql only insert/update one data. => use execute(sql, entries)
                 type of entries == list of list of args means the sql insert/update MORE than one data. => use executemany(sql, entries)
-            multiple (boolean, optinal): If the entries have multiple data to execute. Defaults to False.
+            multiple (boolean, optional): If the entries have multiple data to execute. Defaults to False.
             statement_timeout (int, optional): Timeout number in second for statement. -1 means no timeout. Defaults to -1.
 
         Returns:
@@ -496,15 +539,15 @@ class PostgresModelHandler(metaclass=PostgresMeta):
 
     Required Class Attributes:
         meta (dict): The meta data of this class.
-            \- initialize (boolean): If this class will be initialized when server starts.
-            \- conditional_init (boolean): If this class will be initialized conditionally.
-            \- init_index (boolean): If this class will be initialized with index.
-            \- index_prefix (string): The prefix of the index name.
-            \- init_type (string): The type of initialization. It could be "schema", "table" or "enum".
+            \- initialize (boolean): If this class will be initialized when server starts. Default is False.
+            \- conditional_init (boolean): If this class will be initialized conditionally. Default is False.
+            \- init_index (boolean): If this class will be initialized with index. Default is False.
+            \- index_prefix (string): The prefix of the index name. Default is "idx_".
+            \- init_type (string): The type of initialization. It could be "schema", "table" or "enum". Required.
             \- authorization (string): The authorization of the schema. This value will be the parameter of cls.form_schema_sql if no authorization is given.
-            \- schema_name (list): The schema name.
-            \- table_name (list): The table name, but the length of this list should be 1.
-            \- enum_name (list): The enum name, but the length of this list should be 1.
+            \- schema_name (Union[str, list]): The schema name. Required if init_type is "schema" or "table".
+            \- table_name (Union[str, list]): The table name. If the type is list, the length should be 1. Required if init_type is "table".
+            \- enum_name (Union[str, list]): The enum name. If the type is list, the length should be 1. Required if init_type is "enum".
     
     Required Class Methods (when meta["conditional_init"] == True):
         if_initialize (method): The method to form the conditional initialization sql command.
@@ -529,6 +572,7 @@ class PostgresModelHandler(metaclass=PostgresMeta):
     _table_entries_dict = {}
     _schema_entries_dict = {}
     _index_entries_dict = {}
+    _enum_entries_dict = {}
 
     meta = {
         "initialize": False,
@@ -588,6 +632,39 @@ class PostgresModelHandler(metaclass=PostgresMeta):
         return ret_list
 
     @classmethod
+    def restore_enum_data(cls, table_data: list, target_columns=[]) -> list:
+        """
+        This is the method to restore the enum data.
+
+        Args:
+            table_data (list of dict): The table data.
+            target_columns (list, optional): The columns to restore. Defaults to [] which means all columns.
+        
+        Returns:
+            table_data (list of dict): The restored table data.
+        """
+        total_enum_field_dict = {k: v for k, v in cls.__dict__.items() if isinstance(v, PostgresField) and v.enum_class != None}
+        restore_enum_field_dict = {}
+        if len(target_columns) > 0:
+            for column in target_columns:
+                if column in total_enum_field_dict:
+                    restore_enum_field_dict[column] = total_enum_field_dict[column]
+                else:
+                    raise ValueError(f"( {cls.__name__} ) The column '{column}' is not an enum field or the enum class is not imported into PostgresField")
+        else:
+            restore_enum_field_dict = total_enum_field_dict
+
+        for item in table_data:
+            for column, field in restore_enum_field_dict.items():
+                raw_value = item[column]
+                enum_option_dict = field.enum_class.get_enum_reversed_dict()
+                enum_key = enum_option_dict.get(raw_value, None)
+                if enum_key == None:
+                    raise ValueError(f"( {cls.__name__} ) The enum value '{item[column]}' of the column '{column}' is not defined in the enum class '{field.enum_class.__name__}'")
+                item[column] = field.enum_class.__dict__[enum_key]
+        return table_data
+
+    @classmethod
     def get_field_dict(cls) -> dict:
         """
         This is the method to get the field dictionary.
@@ -626,6 +703,29 @@ class PostgresModelHandler(metaclass=PostgresMeta):
             sql conditions (string): The enum conditions.
         """
         return ', '.join(f"{k} {v}" for k, v in cls.__dict__.items() if isinstance(v, PostgresEnum))
+
+    @classmethod
+    def get_enum_reversed_dict(cls) -> dict:
+        """
+        This is the method to get the reversed enum dictionary.
+
+        Returns:
+            reversed_enum_dict (dict): The reversed enum dictionary.
+        """
+        return {v.value: k for k, v in cls.__dict__.items() if isinstance(v, PostgresEnum)}
+
+    @classmethod
+    def enum_value_includes(cls, value) -> bool:
+        """
+        This is the method to check if the value is in the enum.
+
+        Args:
+            value (any): The value to check.
+        
+        Returns:
+            indicator (boolean): If the value is in the enum.
+        """
+        return value in cls.get_enum_reversed_dict()
 
     @classmethod
     def get_field_index_dict(cls) -> dict:
@@ -699,10 +799,10 @@ class PostgresModelHandler(metaclass=PostgresMeta):
             if cls.meta["authorization"] != None:
                 authorization = cls.meta["authorization"]
             else:
-                raise Exception(f"( {cls.__name__} ) No define authorization")
+                raise ValueError(f"( {cls.__name__} ) No define authorization")
 
         if cls.meta["init_type"] != cls.INIT_TYPE["SCHEMA"]:
-            raise Exception(f"( {cls.__name__} )  init_type ({cls.meta['init_type']}) can't execute 'form_schema_sql' method")
+            raise ValueError(f"( {cls.__name__} )  init_type ({cls.meta['init_type']}) can't execute 'form_schema_sql' method")
         
         return f"""
         CREATE SCHEMA IF NOT EXISTS {cls.meta["schema_name"][0]} AUTHORIZATION {authorization};
@@ -717,7 +817,7 @@ class PostgresModelHandler(metaclass=PostgresMeta):
             table_sql (string): The table sql command.
         """
         if cls.meta["init_type"] != cls.INIT_TYPE["TABLE"]:
-            raise Exception(f"( {cls.__name__} )  init_type ({cls.meta['init_type']}) can't execute 'form_table_sql' method")
+            raise ValueError(f"( {cls.__name__} )  init_type ({cls.meta['init_type']}) can't execute 'form_table_sql' method")
         
         table_sql = ""
         for item in cls.meta["schema_name"]:
@@ -736,7 +836,7 @@ class PostgresModelHandler(metaclass=PostgresMeta):
             table_sql (string): The table sql command.
         """
         if cls.meta["init_type"] != cls.INIT_TYPE["TABLE"]:
-            raise Exception(f"( {cls.__name__} )  init_type ({cls.meta['init_type']}) can't execute 'form_table_conditional_sql' method")
+            raise ValueError(f"( {cls.__name__} )  init_type ({cls.meta['init_type']}) can't execute 'form_table_conditional_sql' method")
         
         table_sql = ""
         for item in cls.meta["schema_name"]:
@@ -769,7 +869,7 @@ class PostgresModelHandler(metaclass=PostgresMeta):
             prefix = cls.meta["index_prefix"]
 
         if cls.meta["init_type"] != cls.INIT_TYPE["TABLE"]:
-            raise Exception(f"( {cls.__name__} )  init_type ({cls.meta['init_type']}) can't execute 'form_index_sql' method")
+            raise ValueError(f"( {cls.__name__} )  init_type ({cls.meta['init_type']}) can't execute 'form_index_sql' method")
         
         index_sql = ""
         index_dict = cls.get_field_index_dict()
@@ -791,7 +891,7 @@ class PostgresModelHandler(metaclass=PostgresMeta):
             enum_sql (string): The enum sql command.
         """
         if cls.meta["init_type"] != cls.INIT_TYPE["ENUM"]:
-            raise Exception(f"( {cls.__name__} )  init_type ({cls.meta['init_type']}) can't execute 'form_enum_sql' method")
+            raise ValueError(f"( {cls.__name__} )  init_type ({cls.meta['init_type']}) can't execute 'form_enum_sql' method")
         
         return f"""
         CREATE TYPE {cls.meta["enum_name"][0]} AS ENUM ({cls.get_enum_conditions()});
@@ -807,11 +907,14 @@ class PostgresModelHandler(metaclass=PostgresMeta):
                 cls._table_entries_dict[cls.__name__] = cls.form_table_conditional_sql()
             else:
                 cls._table_entries_dict[cls.__name__] = cls.form_table_sql()
-            cls._index_entries_dict[cls.__name__] = cls.form_index_sql()
-        elif cls.meta["init_type"]== cls.INIT_TYPE["SCHEMA"]:
+            if cls.meta["init_index"]:
+                cls._index_entries_dict[cls.__name__] = cls.form_index_sql()
+        elif cls.meta["init_type"] == cls.INIT_TYPE["SCHEMA"]:
             cls._schema_entries_dict[cls.__name__] = cls.form_schema_sql()
+        elif cls.meta["init_type"] == cls.INIT_TYPE["ENUM"]:
+            cls._enum_entries_dict[cls.__name__] = cls.form_enum_sql()
         else:
-            raise Exception("Invalid meta type")
+            raise ValueError("Invalid init_type in meta.")
 
     @classmethod
     def execute_sql(cls, postgres_handler: PostgresHandler, sql_cb=None):
@@ -828,7 +931,7 @@ class PostgresModelHandler(metaclass=PostgresMeta):
         if sql_cb:
             sql_input = sql_cb()
         else:
-            sql_input = f"{' '.join(cls._schema_entries_dict.values())} {' '.join(cls._table_entries_dict.values())} {' '.join(cls._index_entries_dict.values())}"
+            sql_input = f"{' '.join(cls._enum_entries_dict.values())} {' '.join(cls._schema_entries_dict.values())} {' '.join(cls._table_entries_dict.values())} {' '.join(cls._index_entries_dict.values())}"
         postgres_handler._execute_sql(db_operation_mode.MODE_DB_NORMAL, sql_input)
 
     @classmethod
@@ -889,7 +992,7 @@ class PostgresField:
         customized_sql (string, optional): Defaults to "".
     """
     def __init__(self, field_type="", required=False, default=None, serial=False, primary_key=False,
-                       unique=False, check="", generated_as="", index_type="", customized_sql=""):
+                       unique=False, check="", generated_as="", index_type="", customized_sql="", enum_class=None):
         self.field_type = field_type
         self.default = default
         self.required = required
@@ -900,9 +1003,21 @@ class PostgresField:
         self.generated_as = generated_as
         self.index_type = index_type
         self.customized_sql = customized_sql
+        self.enum_class = None
+        self.init_enum_class(enum_class)
     
     def __str__(self):
         return f"{self.field_type.upper()}{self.get_default()}{self.get_required()}{self.get_serial()}{self.get_primary_key()}{self.get_unique()}{self.get_check()}{self.get_generated_as()}{self.get_customized_sql()}"
+
+    def init_enum_class(self, enum_class):
+        if enum_class != None:
+            enum_name = enum_class.meta["enum_name"][0]
+            if self.field_type == "":
+                self.field_type = enum_name
+            else:
+                if self.field_type != enum_name:
+                    raise ValueError(f"The enum name ({enum_name}) does not match the field type ({self.field_type}).")
+            self.enum_class = enum_class
 
     def get_default(self):
         return f" DEFAULT {self.default}" if self.default is not None else ""
