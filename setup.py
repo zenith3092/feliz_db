@@ -9,7 +9,7 @@ with open(os.path.join(os.path.dirname(__file__), "requirements.txt"), "r") as f
 
 setuptools.setup(
     name="feliz_db",
-    version="0.0.10",
+    version="0.0.11",
     author="Vincent Wu, Linga Chen, Brian Yin",
     author_email="zenith3092@gmail.com",
     description="A framework designed to assist in using databases and compatible with feliz framework",
@@ -25,4 +25,7 @@ setuptools.setup(
         "Operating System :: OS Independent",
     ],
     python_requires='>=3.9',
+    project_urls={
+        "Source": "https://github.com/zenith3092/feliz_db",
+    },
 )
