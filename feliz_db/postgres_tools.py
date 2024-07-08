@@ -964,7 +964,7 @@ class PostgresModelHandler(metaclass=PostgresMeta):
         """
         ** customized method **
         else_initialize is the method to form the conditional initialization sql command.
-        If the table already exists, the else_initialize will be executed.ｆ
+        If the table already exists, the else_initialize will be executed.
 
         Args:
             schema_name (string): The schema name.
