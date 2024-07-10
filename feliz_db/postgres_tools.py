@@ -702,7 +702,7 @@ class PostgresModelHandler(metaclass=PostgresMeta):
         Returns:
             sql conditions (string): The enum conditions.
         """
-        return ', '.join(f"{k} {v}" for k, v in cls.__dict__.items() if isinstance(v, PostgresEnum))
+        return ', '.join(f"'{v.value}'" for k, v in cls.__dict__.items() if isinstance(v, PostgresEnum))
 
     @classmethod
     def get_enum_reversed_dict(cls) -> dict:
@@ -894,7 +894,12 @@ class PostgresModelHandler(metaclass=PostgresMeta):
             raise ValueError(f"( {cls.__name__} )  init_type ({cls.meta['init_type']}) can't execute 'form_enum_sql' method")
         
         return f"""
-        CREATE TYPE {cls.meta["enum_name"][0]} AS ENUM ({cls.get_enum_conditions()});
+        DO $$
+        BEGIN
+            IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = '{cls.meta["enum_name"][0]}') THEN
+            CREATE TYPE {cls.meta["enum_name"][0]} AS ENUM ({cls.get_enum_conditions()});
+            END IF;
+        END $$;
         """
 
     @classmethod
