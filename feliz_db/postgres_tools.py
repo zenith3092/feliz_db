@@ -190,7 +190,7 @@ class PostgresHandler:
             conn = psycopg2.connect(database=self.database, user=self.username, password=self.password, host=self.host, port=self.port, connect_timeout=5)
             logging.info(" [PostgresHandler] Connection with database is OK")
         except Exception as e:
-            logging.warning(" [PostgresHandler] Cannot connect to database server, because "+str(e))
+            logging.warning(" [PostgresHandler] Cannot connect to database server, because " + str(e))
         finally:
             if conn is not None:
                 conn.close()
@@ -231,7 +231,7 @@ class PostgresHandler:
             if statement_timeout <= 0:
                 conn = psycopg2.connect(database=self.database, user=self.username, password=self.password, host=self.host, port=self.port, connect_timeout=5)
             else:
-                timeout_arg = '-c statement_timeout='+str(statement_timeout*1000) # options for statement timeout
+                timeout_arg = '-c statement_timeout=' + str(statement_timeout*1000) # options for statement timeout
                 conn = psycopg2.connect(database=self.database, user=self.username, password=self.password, host=self.host, port=self.port, connect_timeout=5, options=timeout_arg)
             c = conn.cursor()
 
@@ -265,7 +265,7 @@ class PostgresHandler:
             result["message"] = "operation succeed"
         except Exception as e:
             traceback.print_exc()
-            logging.warning(("[PostgresHandler] execute_sql Error: "+str(e)))
+            logging.warning(("[PostgresHandler] execute_sql Error: " + str(e)))
             result["message"] = str(e)
         finally:
             if conn is not None:
@@ -376,9 +376,9 @@ class PostgresHandler:
             
             return result
         except Exception as e:
-            msg = "[PostgresHandler] get_data ERROR: "+str(e)
+            msg = "[PostgresHandler] (table: ) get_data ERROR: "%(table) + str(e)
             logging.error(msg)
-            return {"indicator": False, "message":msg, "header":[], "data":[], "formatted_data": []}
+            return {"indicator": False, "message": msg, "header": [], "data": [], "formatted_data": []}
         
     def update_data(self, table, editing_list, reference_column_list):
         """
@@ -437,9 +437,9 @@ class PostgresHandler:
             del result["data"]
             return result
         except Exception as e:
-            msg = "[PostgresHandler] update_data ERROR: "+str(e)
+            msg = "[PostgresHandler] (table: %s) update_data ERROR: "%(table) + str(e)
             logging.error(msg)
-            return {"indicator": False, "message":msg}
+            return {"indicator": False, "message": msg}
 
     def add_data(self, table, adding_list, adding_header_list=[], to_null=False, no_ser_pk=True):
         """
@@ -489,9 +489,9 @@ class PostgresHandler:
             del result["data"]
             return result
         except Exception as e:
-            msg = "[PostgresHandler] add_data ERROR: "+str(e)
+            msg = "[PostgresHandler] (table: %s) add_data ERROR: "%(table) + str(e)
             logging.error(msg)
-            return {"indicator": False, "message":msg}
+            return {"indicator": False, "message": msg}
 
     def delete_data(self, table, filter_list, reference_column_list):
         """
@@ -529,9 +529,9 @@ class PostgresHandler:
             del result["data"]
             return result
         except Exception as e:
-            msg = "[PostgresHandler] delete_data ERROR: "+str(e)
+            msg = "[PostgresHandler] (table: %s) delete_data ERROR: "%(table) + str(e)
             logging.error(msg)
-            return {"indicator": False, "message":msg}
+            return {"indicator": False, "message": msg}
 
 class PostgresModelHandler(metaclass=PostgresMeta):
     """
@@ -568,6 +568,9 @@ class PostgresModelHandler(metaclass=PostgresMeta):
         other attributes: Named by the headers of the table and the value is the default value of the table.
     """
     INIT_TYPE = {"TABLE": "table", "SCHEMA": "schema", "ENUM": "enum"}
+
+    key = ""
+    value = ""
 
     _table_entries_dict = {}
     _schema_entries_dict = {}

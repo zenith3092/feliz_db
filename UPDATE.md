@@ -1,21 +1,66 @@
 # Update History
 
+## v0.0.12
+
+### Update `PostgresHandler`
+
+#### Exception handling
+
+If using the following methods of `PostgresHandler`:
+
+- `add_data`
+- `get_data`
+- `update_data`
+- `delete_data`
+  and there is an error in the process, the program will raise an exception.
+
+In this version, the exception message contains the table name.
+
+### Add pseudo class attribute in `PostgresModelHandler`
+
+For using `PostgresEnum` more conveniently, two pseudo class attributes are added to `PostgresModelHandler`:
+
+- `key`
+- `value`
+
+The two can be used to type the `PostgresEnum` value more conveniently.
+
+```python
+from feliz_db.postgres_tools import PostgresModelHandler, PostgresEnum
+
+class TestEnum(PostgresModelHandler):
+    A = PostgresEnum("1")
+    B = PostgresEnum("2")
+    C = PostgresEnum("3")
+
+    meta = {
+        "init_type": "enum",
+        "enum_name": "test"
+    }
+
+def test_function(test_enum: TestEnum):
+    print(test_enum.key)
+    print(test_enum.value)
+
+test_function(TestEnum.A) # "A", "1"
+```
+
 ## v0.0.11
 
 ### Update `meta`
 
 #### New features
 
--   init_index (bool): If `True`, the index will be initialized at the first time the table is created.
--   init_type (str): Previously, the options of `init_type` were `schema` and `table`. Now, new option `enum` is available.
--   enum_name (str or list): The name of the enum type. This parameter is required when the `init_type` is `enum`.
+- init_index (bool): If `True`, the index will be initialized at the first time the table is created.
+- init_type (str): Previously, the options of `init_type` were `schema` and `table`. Now, new option `enum` is available.
+- enum_name (str or list): The name of the enum type. This parameter is required when the `init_type` is `enum`.
 
 #### Update features
 
--   initialize (bool): Now has a default value of `False`. Programmers do not need set it if they do not want to initialize the database.
--   conditional_init (bool): Now has a default value of `False`. Programmers do not need set it if they do not want to conditionally initialize the database.
--   schema_name, table_name, enum_name (str or list): Now can accept a list of strings or a pure string. But the length of the `table_name` and `enum_name` should be 1.
--   authorization (str): Previously, if the `init_type` was `schema`, the `authorization` was the required parameter. Now, the `authorization` is not required. The default value is `None`. This change is to make the `authorization` parameter more flexible. If programmers want to let the `PostgresInitialware` in `feliz` to automatically set the `authorization`, they can set the `authorization` to `None`. If programmers want to set the `authorization` by themselves, they can set the `authorization` to the value they want.
+- initialize (bool): Now has a default value of `False`. Programmers do not need set it if they do not want to initialize the database.
+- conditional_init (bool): Now has a default value of `False`. Programmers do not need set it if they do not want to conditionally initialize the database.
+- schema_name, table_name, enum_name (str or list): Now can accept a list of strings or a pure string. But the length of the `table_name` and `enum_name` should be 1.
+- authorization (str): Previously, if the `init_type` was `schema`, the `authorization` was the required parameter. Now, the `authorization` is not required. The default value is `None`. This change is to make the `authorization` parameter more flexible. If programmers want to let the `PostgresInitialware` in `feliz` to automatically set the `authorization`, they can set the `authorization` to `None`. If programmers want to set the `authorization` by themselves, they can set the `authorization` to the value they want.
 
 ### New model field - `PostgresEnum`
 
