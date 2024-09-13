@@ -9,12 +9,24 @@ class DocumentHandler(mongo.Document):
     meta = { "abstract": True}
 
     @classmethod
-    def format_data(cls, mongo_obj):
+    def format_data(cls, mongo_obj) -> dict:
+        """
+        Format data from mongo_obj to dict
+
+        Args:
+            mongo_obj (mongoengine.Document): mongo_obj
+        """
         sub_item = mongo_obj.to_mongo().to_dict()
         return sub_item
 
     @classmethod
-    def format_data_list(cls, mongo_obj_list):
+    def format_data_list(cls, mongo_obj_list) -> list:
+        """
+        Format data from mongo_obj_list to list of dict
+
+        Args:
+            mongo_obj_list (list[mongoengine.Document]): list of mongo_obj
+        """
         ret = []
         for item in mongo_obj_list:
             sub_item = item.to_mongo().to_dict()
@@ -22,7 +34,13 @@ class DocumentHandler(mongo.Document):
         return ret
     
     @classmethod
-    def format_and_validate_document(cls, data):
+    def format_and_validate_document(cls, data) -> list:
+        """
+        Format and validate data to list of dict
+
+        Args:
+            data (list[dict]): data to format and validate
+        """
         ret = []
         for item in data:
             add_item = cls(**item)
@@ -32,6 +50,12 @@ class DocumentHandler(mongo.Document):
     
     @classmethod
     def _process_id_condition(cls, conditions: dict) -> dict:
+        """
+        Process id condition in conditions to ObjectId
+
+        Args:
+            conditions (dict): conditions of query (follow MongoDB query syntax)
+        """
         if conditions.get("_id"):
             id_condition = conditions["_id"]
             if isinstance(id_condition, str):
@@ -64,40 +88,97 @@ class DocumentHandler(mongo.Document):
 
     @classmethod
     def handle_modified_time(cls, data: list, time_format="%Y%m%d%H%M%S%f") -> list:
+        """
+        Handle modified time in data
+
+        Args:
+            data (list[dict]): data
+            time_format (str, optional): time format. Defaults to "%Y%m%d%H%M%S%f".
+        """
         for item in data:
             item["modified_time"] = datetime.datetime.now().strftime(time_format)[:-3]
         return data
 
     @classmethod
     def get_headers(cls):
+        """
+        Get headers of schema
+
+        Returns:
+            list[str]: headers of schema
+        """
         return list(cls._fields_ordered)
 
     @classmethod
-    def add_data(cls, data):
+    def add_data(cls, data) -> list:
+        """
+        Add data to MongoDB
+
+        Args:
+            data (list[dict]): data to add
+        
+        Returns:
+            list[dict]: data added
+        """
         add_data = cls.format_and_validate_document(data)
         ret = cls.objects.insert(add_data)
         return cls.format_data_list(ret)
 
     @classmethod
-    def get_data(cls, conditions, order_by_list=[]):
+    def get_data(cls, conditions, order_by_list=[], limit=0) -> list:
+        """
+        Get data from MongoDB
+
+        Args:
+            conditions (dict): conditions of query (follow MongoDB query syntax)
+            order_by_list (list, optional): order by. + for ascending and - for descending. e.g. ["-modified_time"]. Defaults to [].
+            limit (int, optional): limit the number of data. Defaults to 0 (0 means no limit).
+        
+        Returns:
+            list[dict]: data queried
+        """
         if conditions:
             conditions = cls._process_id_condition(conditions)
             raw_data = cls.objects(__raw__=conditions)
         else:
             raw_data = cls.objects
-        return cls.format_data_list(raw_data.order_by(*order_by_list))
+        return cls.format_data_list(raw_data.order_by(*order_by_list).limit(limit))
     
     @classmethod
-    def update_data(cls, conditions, update_data):
+    def update_data(cls, conditions, update_data, customized) -> dict:
+        """
+        Update data in MongoDB
+
+        Args:
+            conditions (dict): conditions of query (follow MongoDB query syntax)
+            update_data (dict): data to update
+            customized (bool): whether the update_data is customized or not. Defaults to False (False means the update_data is wrapped by "$set").
+        
+        Returns:
+            dict: data updated
+        """
         if conditions:
             conditions = cls._process_id_condition(conditions)
             raw_data = cls.objects(__raw__=conditions)
         else:
             raw_data = cls.objects
+        
+        if customized:
+            return cls.format_data(raw_data.modify(__raw__=update_data, new=True))
+
         return cls.format_data(raw_data.modify(__raw__={"$set": update_data}, new=True))
     
     @classmethod
-    def delete_data(cls, conditions):
+    def delete_data(cls, conditions) -> int:
+        """
+        Delete data from MongoDB
+
+        Args:
+            conditions (dict): conditions of query (follow MongoDB query syntax)
+        
+        Returns:
+            int: number of data deleted
+        """
         if conditions:
             conditions = cls._process_id_condition(conditions)
             raw_data = cls.objects(__raw__=conditions)
@@ -202,7 +283,7 @@ class MongoHandler:
         self.disconnect()
         return {"indicator": indicator, "message": message, "formatted_data": data}
 
-    def get_data(self, schema_name: str, conditions={}, order_by_list=[]) -> dict:
+    def get_data(self, schema_name: str, conditions={}, order_by_list=[], limit=0) -> dict:
         """
         Get data from MongoDB
         
@@ -210,7 +291,8 @@ class MongoHandler:
             schema_name (str): name of schema (collection name in MongoDB)
             conditions (dict): conditions of query (follow MongoDB query syntax)
             order_by_list (list, optional): order by. + for ascending and - for descending. e.g. ["-modified_time"]. Defaults to [].
-            
+            limit (int, optional): limit the number of data. Defaults to 0 (0 means no limit).
+
         Returns:
             dict: {
                 "indicator": bool,
@@ -264,7 +346,7 @@ class MongoHandler:
 
             indicator = True
             message = "Get data from MongoDB successfully"
-            data = schema.get_data(conditions, order_by_list)
+            data = schema.get_data(conditions, order_by_list, limit)
         except Exception as e:
             indicator = False
             message = "[MongoHandler] Get data from MongoDB failed: {}".format(e)
@@ -306,7 +388,7 @@ class MongoHandler:
         self.disconnect()
         return {"indicator": indicator, "message": message, "formatted_data": data}
     
-    def update_data(self, schema_name: str, conditions: dict, update_data: dict) -> dict:
+    def update_data(self, schema_name: str, conditions: dict, update_data: dict, customized=False) -> dict:
         """
         Update data in MongoDB and return the data updated
         
@@ -314,6 +396,7 @@ class MongoHandler:
             schema_name (str): name of schema
             conditions (dict): conditions of query (follow MongoDB query syntax)
             update_data (dict): data to update
+            customized (bool, optional): whether the update_data is customized. Defaults to False (False means the update_data is wrapped by "$set").
         
         Returns:
             dict: {
@@ -329,7 +412,9 @@ class MongoHandler:
 
             indicator = True
             message = "Update data in MongoDB successfully"
-            data = schema.update_data(conditions, update_data)
+            data = schema.update_data(conditions, update_data, customized)
+            if type(data) == dict:
+                data = [data]
         except Exception as e:
             indicator = False
             message = "[MongoHandler] Update data in MongoDB failed: {}".format(e)
