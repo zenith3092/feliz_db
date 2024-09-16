@@ -155,18 +155,18 @@ class DocumentHandler(mongo.Document):
             customized (bool): whether the update_data is customized or not. Defaults to False (False means the update_data is wrapped by "$set").
         
         Returns:
-            dict: data updated
-        """
+            int: number of data updated
+        """    
         if conditions:
             conditions = cls._process_id_condition(conditions)
             raw_data = cls.objects(__raw__=conditions)
         else:
             raw_data = cls.objects
-        
-        if customized:
-            return cls.format_data(raw_data.modify(__raw__=update_data, new=True))
 
-        return cls.format_data(raw_data.modify(__raw__={"$set": update_data}, new=True))
+        if customized:
+            return raw_data.update(__raw__=update_data)
+        else:
+            return raw_data.update(__raw__={"$set": update_data})
     
     @classmethod
     def delete_data(cls, conditions) -> int:
@@ -413,8 +413,7 @@ class MongoHandler:
             indicator = True
             message = "Update data in MongoDB successfully"
             data = schema.update_data(conditions, update_data, customized)
-            if type(data) == dict:
-                data = [data]
+            data = [{"updated_count": data, "conditions": conditions}]
         except Exception as e:
             indicator = False
             message = "[MongoHandler] Update data in MongoDB failed: {}".format(e)
