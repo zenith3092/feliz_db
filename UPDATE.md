@@ -2,7 +2,7 @@
 
 ## v0.0.13
 
-### Update `PostgresHandler`
+### Update `PostgresModelHandler`
 
 #### Update `meta` of enum
 
