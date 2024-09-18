@@ -77,6 +77,7 @@ class PostgresMeta(type):
 
                     schema_name = merged_meta["schema_name"]
                     table_name = merged_meta["table_name"]
+                    unique_constraint = merged_meta["unique_constraint"]
 
                     if type(schema_name) == str:
                         merged_meta["schema_name"] = [schema_name]
@@ -95,6 +96,11 @@ class PostgresMeta(type):
                             raise ValueError(f"( {name} ) table_name should not be more than one")
                     else:
                         raise TypeError(f"( {name} ) table_name should be string or list")
+                    
+                    if type(unique_constraint) != list:
+                        raise TypeError(f"( {name} ) unique_constraint should be list")
+                    elif not all(isinstance(item, tuple) for item in unique_constraint):
+                        raise TypeError(f"( {name} ) unique_constraint should be list of tuple")
                 elif init_type == metacls.INIT_TYPE["SCHEMA"]:
                     metacls.lack_inspector(name, merged_meta, metacls.SCHEMA_META_REQUIRED)
 
@@ -108,6 +114,12 @@ class PostgresMeta(type):
                         raise TypeError(f"( {name} ) schema_name should be string or list")
                 elif init_type == metacls.INIT_TYPE["ENUM"]:
                     enum_name = merged_meta["enum_name"]
+                    schema_name = merged_meta.get("schema_name", [])
+
+                    if type(schema_name) == str:
+                        merged_meta["schema_name"] = [schema_name]
+                    if type(schema_name) == list and len(schema_name) > 1:
+                        raise ValueError(f"( {name} ) schema_name should be only one")
 
                     if type(enum_name) == str:
                         merged_meta["enum_name"] = [enum_name]
@@ -580,15 +592,16 @@ class PostgresModelHandler(metaclass=PostgresMeta):
         "init_index": False,
         "index_prefix": "idx_",
         "authorization": None,
+        "unique_constraint": [],
     }
 
     def __init__(self) -> None:
-        self._table_name = self.__class__.meta["table_name"][0]
-        self._headers = self.__class__.get_headers()
+        self._table_name       = self.__class__.meta["table_name"][0]
+        self._headers          = self.__class__.get_headers()
         self._required_headers = self.__class__.get_required_headers()
-        self._headers_type = self.__class__.get_headers_type()
-        self._headers_default = self.__class__.get_headers_default()
-        self._field_dict = self.__class__.get_field_dict()
+        self._headers_type     = self.__class__.get_headers_type()
+        self._headers_default  = self.__class__.get_headers_default()
+        self._field_dict       = self.__class__.get_field_dict()
         self._field_conditions = self.__class__.get_field_conditions()
         self._field_index_dict = self.__class__.get_field_index_dict()
 
@@ -603,12 +616,7 @@ class PostgresModelHandler(metaclass=PostgresMeta):
         Returns:
             ret_dict (dict): The table data.
         """
-        ret_dict = {}
-        _headers = self._headers
-        for _header in _headers:
-            if _header in self.__dict__:
-                ret_dict[_header] = self.__dict__[_header]
-        return ret_dict
+        return {_header: self.__dict__[_header] for _header in self._headers if _header in self.__dict__}
 
     @classmethod
     def from_table_format(cls, table_data: list) -> list:
@@ -665,6 +673,16 @@ class PostgresModelHandler(metaclass=PostgresMeta):
         return table_data
 
     @classmethod
+    def get_unique_constraint_conditions(cls) -> str:
+        """
+        This is the method to get the unique constraint conditions.
+
+        Returns:
+            sql conditions (string): The unique constraint conditions.
+        """
+        return ', ' + ', '.join(f"UNIQUE ({', '.join(v)})" for v in cls.meta["unique_constraint"]) if len(cls.meta["unique_constraint"]) > 0 else ""
+
+    @classmethod
     def get_field_dict(cls) -> dict:
         """
         This is the method to get the field dictionary.
@@ -683,7 +701,17 @@ class PostgresModelHandler(metaclass=PostgresMeta):
             sql conditions (string): The field conditions.
         """
         return ', '.join(f"{k} {v}" for k, v in cls.__dict__.items() if isinstance(v, PostgresField))
-    
+
+    @classmethod
+    def get_field_index_dict(cls) -> dict:
+        """
+        This is the method to get the index type of the headers.
+
+        Returns:
+            index_dict (dict): The index type of the headers.
+        """
+        return {k: v.index_type for k, v in cls.__dict__.items() if isinstance(v, PostgresField) and v.index_type != ""}
+
     @classmethod
     def get_enum_dict(cls) -> dict:
         """
@@ -726,16 +754,6 @@ class PostgresModelHandler(metaclass=PostgresMeta):
             indicator (boolean): If the value is in the enum.
         """
         return value in cls.get_enum_reversed_dict()
-
-    @classmethod
-    def get_field_index_dict(cls) -> dict:
-        """
-        This is the method to get the index type of the headers.
-
-        Returns:
-            index_dict (dict): The index type of the headers.
-        """
-        return {k: v.index_type for k, v in cls.__dict__.items() if isinstance(v, PostgresField) and v.index_type != ""}
 
     @classmethod
     def get_headers(cls) -> list:
@@ -822,7 +840,7 @@ class PostgresModelHandler(metaclass=PostgresMeta):
         table_sql = ""
         for item in cls.meta["schema_name"]:
             table_sql += f"""
-            CREATE TABLE IF NOT EXISTS {item}.{cls.meta["table_name"][0]} ( {cls.get_field_conditions()} );
+            CREATE TABLE IF NOT EXISTS {item}.{cls.meta["table_name"][0]} ( {cls.get_field_conditions()} ) {cls.get_unique_constraint_conditions()};
             """
         
         return table_sql
@@ -846,7 +864,7 @@ class PostgresModelHandler(metaclass=PostgresMeta):
             DO $$
             BEGIN
             IF NOT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = '{item}' AND table_name = '{cls.meta["table_name"][0]}') THEN
-                CREATE TABLE {item}.{cls.meta["table_name"][0]} ( {cls.get_field_conditions()} );
+                CREATE TABLE {item}.{cls.meta["table_name"][0]} ( {cls.get_field_conditions()} ) {cls.get_unique_constraint_conditions()};
                 {if_conditions}
             {"ELSE " + else_conditions if else_conditions else ""}
             END IF;
@@ -897,7 +915,7 @@ class PostgresModelHandler(metaclass=PostgresMeta):
         DO $$
         BEGIN
             IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = '{cls.meta["enum_name"][0]}') THEN
-            CREATE TYPE {cls.meta["enum_name"][0]} AS ENUM ({cls.get_enum_conditions()});
+            CREATE TYPE {cls.meta["schema_name"][0] + "." if len(cls.meta["schema_name"]) > 0 else ""}{cls.meta["enum_name"][0]} AS ENUM ({cls.get_enum_conditions()});
             END IF;
         END $$;
         """
@@ -1017,11 +1035,13 @@ class PostgresField:
     def init_enum_class(self, enum_class):
         if enum_class != None:
             enum_name = enum_class.meta["enum_name"][0]
+            enum_schema_name = enum_class.meta["schema_name"][0] + "." if len(enum_class.meta["schema_name"]) > 0 else ""
+            complete_enum_name = f"{enum_schema_name}{enum_name}"
             if self.field_type == "":
-                self.field_type = enum_name
+                self.field_type = complete_enum_name
             else:
-                if self.field_type != enum_name:
-                    raise ValueError(f"The enum name ({enum_name}) does not match the field type ({self.field_type}).")
+                if self.field_type != complete_enum_name:
+                    raise ValueError(f"The enum name ({complete_enum_name}) does not match the field type ({self.field_type}).")
             self.enum_class = enum_class
 
     def get_default(self):
