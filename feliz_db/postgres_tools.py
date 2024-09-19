@@ -115,6 +115,7 @@ class PostgresMeta(type):
                 elif init_type == metacls.INIT_TYPE["ENUM"]:
                     enum_name = merged_meta["enum_name"]
                     schema_name = merged_meta.get("schema_name", [])
+                    merged_meta["schema_name"] = schema_name
 
                     if type(schema_name) == str:
                         merged_meta["schema_name"] = [schema_name]
@@ -840,7 +841,7 @@ class PostgresModelHandler(metaclass=PostgresMeta):
         table_sql = ""
         for item in cls.meta["schema_name"]:
             table_sql += f"""
-            CREATE TABLE IF NOT EXISTS {item}.{cls.meta["table_name"][0]} ( {cls.get_field_conditions()} ) {cls.get_unique_constraint_conditions()};
+            CREATE TABLE IF NOT EXISTS {item}.{cls.meta["table_name"][0]} ( {cls.get_field_conditions()} {cls.get_unique_constraint_conditions()} );
             """
         
         return table_sql
@@ -864,7 +865,7 @@ class PostgresModelHandler(metaclass=PostgresMeta):
             DO $$
             BEGIN
             IF NOT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = '{item}' AND table_name = '{cls.meta["table_name"][0]}') THEN
-                CREATE TABLE {item}.{cls.meta["table_name"][0]} ( {cls.get_field_conditions()} ) {cls.get_unique_constraint_conditions()};
+                CREATE TABLE {item}.{cls.meta["table_name"][0]} ( {cls.get_field_conditions()} {cls.get_unique_constraint_conditions()} );
                 {if_conditions}
             {"ELSE " + else_conditions if else_conditions else ""}
             END IF;
