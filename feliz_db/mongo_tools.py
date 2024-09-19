@@ -6,7 +6,7 @@ import datetime
 from bson import ObjectId
 
 class DocumentHandler(mongo.Document):
-    meta = { "abstract": True}
+    meta = {"abstract": True}
 
     @classmethod
     def format_data(cls, mongo_obj) -> dict:
