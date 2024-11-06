@@ -1,5 +1,11 @@
 # Update History
 
+## v0.1.0
+
+## Update `MongoHandler`
+
+In old version, all the transaction of `MongoHandler` is inclusive of the auto connection and disconnection. However, this design lowers the efficiency of the program. In this version, the `MongoHandler` is updated to support the auto connection but manual disconnection. The `MongoHandler` will automatically connect to the database when the instance is created. But the disconnection is not automatically. Programmers need to manually disconnect the database by using the `disconnect` method.
+
 ## v0.0.13
 
 ### Update `PostgresModelHandler`
@@ -44,11 +50,11 @@ In old versions, the return value of `update_data` is a dictionary with the key 
 
 If using the following methods of `PostgresHandler`:
 
-- `add_data`
-- `get_data`
-- `update_data`
-- `delete_data`
-  and there is an error in the process, the program will raise an exception.
+-   `add_data`
+-   `get_data`
+-   `update_data`
+-   `delete_data`
+    and there is an error in the process, the program will raise an exception.
 
 In this version, the exception message contains the table name.
 
@@ -56,8 +62,8 @@ In this version, the exception message contains the table name.
 
 For using `PostgresEnum` more conveniently, two pseudo class attributes are added to `PostgresModelHandler`:
 
-- `key`
-- `value`
+-   `key`
+-   `value`
 
 The two can be used to type the `PostgresEnum` value more conveniently.
 
@@ -87,16 +93,16 @@ test_function(TestEnum.A) # "A", "1"
 
 #### New features
 
-- init_index (bool): If `True`, the index will be initialized at the first time the table is created.
-- init_type (str): Previously, the options of `init_type` were `schema` and `table`. Now, new option `enum` is available.
-- enum_name (str or list): The name of the enum type. This parameter is required when the `init_type` is `enum`.
+-   init_index (bool): If `True`, the index will be initialized at the first time the table is created.
+-   init_type (str): Previously, the options of `init_type` were `schema` and `table`. Now, new option `enum` is available.
+-   enum_name (str or list): The name of the enum type. This parameter is required when the `init_type` is `enum`.
 
 #### Update features
 
-- initialize (bool): Now has a default value of `False`. Programmers do not need set it if they do not want to initialize the database.
-- conditional_init (bool): Now has a default value of `False`. Programmers do not need set it if they do not want to conditionally initialize the database.
-- schema_name, table_name, enum_name (str or list): Now can accept a list of strings or a pure string. But the length of the `table_name` and `enum_name` should be 1.
-- authorization (str): Previously, if the `init_type` was `schema`, the `authorization` was the required parameter. Now, the `authorization` is not required. The default value is `None`. This change is to make the `authorization` parameter more flexible. If programmers want to let the `PostgresInitialware` in `feliz` to automatically set the `authorization`, they can set the `authorization` to `None`. If programmers want to set the `authorization` by themselves, they can set the `authorization` to the value they want.
+-   initialize (bool): Now has a default value of `False`. Programmers do not need set it if they do not want to initialize the database.
+-   conditional_init (bool): Now has a default value of `False`. Programmers do not need set it if they do not want to conditionally initialize the database.
+-   schema_name, table_name, enum_name (str or list): Now can accept a list of strings or a pure string. But the length of the `table_name` and `enum_name` should be 1.
+-   authorization (str): Previously, if the `init_type` was `schema`, the `authorization` was the required parameter. Now, the `authorization` is not required. The default value is `None`. This change is to make the `authorization` parameter more flexible. If programmers want to let the `PostgresInitialware` in `feliz` to automatically set the `authorization`, they can set the `authorization` to `None`. If programmers want to set the `authorization` by themselves, they can set the `authorization` to the value they want.
 
 ### New model field - `PostgresEnum`
 

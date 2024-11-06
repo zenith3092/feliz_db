@@ -4,6 +4,11 @@ from pymongo import MongoClient
 import logging
 import datetime
 from bson import ObjectId
+from enum import Enum
+
+class CONNECTION_STATUS(Enum):
+    CONNECTED = "connected"
+    DISCONNECTED = "disconnected"
 
 class DocumentHandler(mongo.Document):
     meta = {"abstract": True}
@@ -211,6 +216,7 @@ class MongoHandler:
         self.username = username
         self.password = password
         self.timeout = kwargs.get("timeout") if kwargs.get("timeout") else 5000
+        self.connection_status = CONNECTION_STATUS.DISCONNECTED
 
         if not logging.getLogger().hasHandlers():
             logging.basicConfig(level=logging.INFO)
@@ -229,10 +235,11 @@ class MongoHandler:
             if first_time:
                 client = MongoClient(host=self.host, port=self.port, username=self.username, password=self.password, serverSelectionTimeoutMS=self.timeout)
                 client.server_info()
-                logging.info(" [MongoHandler] Connect to MongoDB successfully ")
+                logging.info(f" [MongoHandler] Connect to MongoDB ({self.alias}) successfully ")
                 client.close()
             else:
                 mongo.connect(alias=self.alias, db=self.database, host=self.host, port=self.port, username=self.username, password=self.password, serverSelectionTimeoutMS=self.timeout)
+                self.connection_status = CONNECTION_STATUS.CONNECTED
         except ServerSelectionTimeoutError as e:
             logging.warning(" [MongoHandler] Connect to MongoDB failed: \n{} ".format(e))
         except Exception as e:
@@ -243,6 +250,7 @@ class MongoHandler:
         This function is used to disconnect from MongoDB
         """
         mongo.disconnect(alias=self.alias)
+        self.connection_status = CONNECTION_STATUS.DISCONNECTED
     
     def _create_schemas(self, schemas: dict[str, DocumentHandler]) -> None:
         """
@@ -256,7 +264,7 @@ class MongoHandler:
         for schema_name, schema in schemas.items():
             self.__dict__[schema_name] = schema
     
-    def get_headers(self, schema_name: str) -> dict:
+    def get_headers(self, schema_name: str, auto_disconnect=False) -> dict:
         """
         Get headers of a schema
         
@@ -270,7 +278,9 @@ class MongoHandler:
                 "formatted_data": list[dict]
             }
         """
-        self.connect()
+        if self.connection_status == CONNECTION_STATUS.DISCONNECTED:
+            self.connect()
+        
         try:
             data = self.__dict__[schema_name].get_headers()
             indicator = True
@@ -280,10 +290,13 @@ class MongoHandler:
             indicator = False
             message = "[MongoHandler] Get headers from MongoDB failed: \n{}".format(e)
             logging.warning(message)
-        self.disconnect()
+        
+        if auto_disconnect:
+            self.disconnect()
+        
         return {"indicator": indicator, "message": message, "formatted_data": data}
 
-    def get_data(self, schema_name: str, conditions={}, order_by_list=[], limit=0) -> dict:
+    def get_data(self, schema_name: str, conditions={}, order_by_list=[], limit=0, auto_disconnect=False) -> dict:
         """
         Get data from MongoDB
         
@@ -339,7 +352,8 @@ class MongoHandler:
             $not + $eq can be replaced by $ne, e.g. {"name": {"$not": {"$eq": "John"}}} can be replaced by {"name": {"$ne": "John"}}
             $nor can be replaced by $nin, e.g. {"$nor": [{"name": "John"}, {"name": "Peter"}]} can be replaced by {"name": {"$nin": ["John", "Peter"]}}
         """
-        self.connect()
+        if self.connection_status == CONNECTION_STATUS.DISCONNECTED:
+            self.connect()
 
         try:
             schema: DocumentHandler = self.__dict__[schema_name]
@@ -353,10 +367,12 @@ class MongoHandler:
             data = []
             logging.warning(message)
         
-        self.disconnect()
+        if auto_disconnect:
+            self.disconnect()
+        
         return {"indicator": indicator, "message": message, "formatted_data": data}
     
-    def add_data(self, schema_name: str, input_data: list[dict]) -> dict:
+    def add_data(self, schema_name: str, input_data: list[dict], auto_disconnect=False) -> dict:
         """
         Add data to MongoDB and return the data added
         
@@ -371,7 +387,8 @@ class MongoHandler:
                 "formatted_data": list[dict]
             }
         """
-        self.connect()
+        if self.connection_status == CONNECTION_STATUS.DISCONNECTED:
+            self.connect()
 
         try:
             schema: DocumentHandler = self.__dict__[schema_name]
@@ -385,10 +402,12 @@ class MongoHandler:
             data = []
             logging.warning(message)
         
-        self.disconnect()
+        if auto_disconnect:
+            self.disconnect()
+        
         return {"indicator": indicator, "message": message, "formatted_data": data}
     
-    def update_data(self, schema_name: str, conditions: dict, update_data: dict, customized=False) -> dict:
+    def update_data(self, schema_name: str, conditions: dict, update_data: dict, customized=False, auto_disconnect=False) -> dict:
         """
         Update data in MongoDB and return the data updated
         
@@ -405,7 +424,8 @@ class MongoHandler:
                 "formatted_data": list
             }
         """
-        self.connect()
+        if self.connection_status == CONNECTION_STATUS.DISCONNECTED:
+            self.connect()
 
         try:
             schema: DocumentHandler = self.__dict__[schema_name]
@@ -420,10 +440,12 @@ class MongoHandler:
             data = []
             logging.warning(message)
 
-        self.disconnect()
+        if auto_disconnect:
+            self.disconnect()
+        
         return {"indicator": indicator, "message": message, "formatted_data": data}
     
-    def delete_data(self, schema_name: str, conditions: dict) -> dict:
+    def delete_data(self, schema_name: str, conditions: dict, auto_disconnect=False) -> dict:
         """
         Delete data from MongoDB
         
@@ -438,7 +460,8 @@ class MongoHandler:
                 "formatted_data": list
             }
         """
-        self.connect()
+        if self.connection_status == CONNECTION_STATUS.DISCONNECTED:
+            self.connect()
         
         try:
             schema: DocumentHandler = self.__dict__[schema_name]
@@ -446,7 +469,6 @@ class MongoHandler:
             indicator = True
             message = "Delete data from MongoDB successfully"
             delete_count = schema.delete_data(conditions)
-
             data = [{"deleted_count": delete_count, "conditions": conditions}]
         except Exception as e:
             indicator = False
@@ -454,7 +476,9 @@ class MongoHandler:
             data = []
             logging.warning(message)
         
-        self.disconnect()
+        if auto_disconnect:
+            self.disconnect()
+        
         return {"indicator": indicator, "message": message, "formatted_data": data}
 
 class MongoWidget:
