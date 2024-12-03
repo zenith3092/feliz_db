@@ -2,6 +2,7 @@ import psycopg2
 import logging, traceback
 from enum import Enum
 from collections import OrderedDict
+from typing import TypedDict, Literal, Union, List, Tuple
 
 class PostgresEnum:
     """
@@ -9,17 +10,23 @@ class PostgresEnum:
 
     Args:
         value (str): The value of the enum.
+        mapping_value (Any, optional): The mapping value of the enum. Defaults to None.
     """
-    def __init__(self, value) -> None:
+    def __init__(self, value: str, mapping_value=None) -> None:
         self.key = ""
         self.source = ""
 
         if type(value) != str:
             raise TypeError(f"Invalid type of value: {type(value)}")
         self.value = value
+        self.name = value
+        self.mapping_value = mapping_value
 
     def __repr__(self):
         return f"PostgresEnum({self.source}, {self.value})"
+    
+    def __str__(self):
+        return self.value
 
 class UniqueEnumKeyDict(OrderedDict):
     def __setitem__(self, key, value):
@@ -156,6 +163,20 @@ class PostgresMeta(type):
 
             new_class.meta = merged_meta
         return new_class
+
+class ModelMeta(TypedDict):
+    initialize: bool
+    conditional_init: bool
+    init_index: bool
+    index_prefix: str
+    init_type: Literal["schema", "table", "enum"]
+    authorization: str
+    schema_name: Union[str, list]
+    table_name: Union[str, list]
+    enum_name: Union[str, list]
+    unique_constraint: List[Tuple[str, str]]
+    other_conditions_sql: str
+    customized_sql: str
 
 class db_operation_mode(Enum):
     """
@@ -561,10 +582,21 @@ class PostgresModelHandler(metaclass=PostgresMeta):
             \- schema_name (Union[str, list]): The schema name. Required if init_type is "schema" or "table".
             \- table_name (Union[str, list]): The table name. If the type is list, the length should be 1. Required if init_type is "table".
             \- enum_name (Union[str, list]): The enum name. If the type is list, the length should be 1. Required if init_type is "enum".
+            \- unique_constraint (List[Tuple[str, str]]): The unique constraint. The format should be like [("column1", "column2"), ...]
+            \- other_conditions_sql (string): The other conditions of the table. This will be put after the header definition. This is useful when you want to declare the constraints of the table.
+            \- customized_sql (string): The customized sql command. This will be put after the creation of the table. This is useful when you want to declare the partition of the table.
     
     Required Class Methods (when meta["conditional_init"] == True):
-        if_initialize (method): The method to form the conditional initialization sql command.
+        if_initialize (method): The method to form the conditional initialization sql command. This part will be executed after the table creation.
         else_initialize (method): The method to form the conditional initialization sql command.
+    
+    Create Function:
+        ${class}.execute_sql(DH, sql_cb)
+        The sql_cb could be the following:
+            \- ${class}.form_schema_sql
+            \- ${class}.form_table_sql
+            \- ${class}.form_enum_sql
+            \- ${class}.form_index_sql
     
     Limitation:
         \- The attribute name of the concrete class should not start with "_"
@@ -587,13 +619,15 @@ class PostgresModelHandler(metaclass=PostgresMeta):
     _index_entries_dict = {}
     _enum_entries_dict = {}
 
-    meta = {
+    meta: ModelMeta = {
         "initialize": False,
         "conditional_init": False,
         "init_index": False,
         "index_prefix": "idx_",
         "authorization": None,
         "unique_constraint": [],
+        "other_conditions_sql": "",
+        "customized_sql": "",
     }
 
     def __init__(self) -> None:
@@ -682,6 +716,16 @@ class PostgresModelHandler(metaclass=PostgresMeta):
             sql conditions (string): The unique constraint conditions.
         """
         return ', ' + ', '.join(f"UNIQUE ({', '.join(v)})" for v in cls.meta["unique_constraint"]) if len(cls.meta["unique_constraint"]) > 0 else ""
+
+    @classmethod
+    def get_other_conditions_sql(cls) -> str:
+        """
+        This is the method to get the customized sql.
+
+        Returns:
+            other_conditions_sql (string): The customized sql.
+        """
+        return "," + cls.meta["other_conditions_sql"] if cls.meta["other_conditions_sql"] != "" else ""
 
     @classmethod
     def get_field_dict(cls) -> dict:
@@ -806,8 +850,8 @@ class PostgresModelHandler(metaclass=PostgresMeta):
                     dic[k] = []
                 elif v.serial and v.primary_key:
                     pass
-                elif v.default == "''":
-                    dic[k] = ""
+                elif v.default.startswith("'") and v.default.endswith("'"):
+                    dic[k] = v.default[1:len(v.default) - 1]
                 else:
                     dic[k] = v.default
         return dic
@@ -841,7 +885,7 @@ class PostgresModelHandler(metaclass=PostgresMeta):
         table_sql = ""
         for item in cls.meta["schema_name"]:
             table_sql += f"""
-            CREATE TABLE IF NOT EXISTS {item}.{cls.meta["table_name"][0]} ( {cls.get_field_conditions()} {cls.get_unique_constraint_conditions()} );
+            CREATE TABLE IF NOT EXISTS {item}.{cls.meta["table_name"][0]} ( {cls.get_field_conditions()} {cls.get_unique_constraint_conditions()} {cls.get_other_conditions_sql()} ) {cls.meta["customized_sql"]};
             """
         
         return table_sql
@@ -865,7 +909,7 @@ class PostgresModelHandler(metaclass=PostgresMeta):
             DO $$
             BEGIN
             IF NOT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = '{item}' AND table_name = '{cls.meta["table_name"][0]}') THEN
-                CREATE TABLE {item}.{cls.meta["table_name"][0]} ( {cls.get_field_conditions()} {cls.get_unique_constraint_conditions()} );
+                CREATE TABLE {item}.{cls.meta["table_name"][0]} ( {cls.get_field_conditions()} {cls.get_unique_constraint_conditions()} {cls.get_other_conditions_sql()} ) {cls.meta["customized_sql"]};
                 {if_conditions}
             {"ELSE " + else_conditions if else_conditions else ""}
             END IF;
@@ -955,7 +999,7 @@ class PostgresModelHandler(metaclass=PostgresMeta):
         if sql_cb:
             sql_input = sql_cb()
         else:
-            sql_input = f"{' '.join(cls._enum_entries_dict.values())} {' '.join(cls._schema_entries_dict.values())} {' '.join(cls._table_entries_dict.values())} {' '.join(cls._index_entries_dict.values())}"
+            sql_input = f"{' '.join(cls._schema_entries_dict.values())} {' '.join(cls._enum_entries_dict.values())} {' '.join(cls._table_entries_dict.values())} {' '.join(cls._index_entries_dict.values())}"
         postgres_handler._execute_sql(db_operation_mode.MODE_DB_NORMAL, sql_input)
 
     @classmethod
@@ -1005,18 +1049,21 @@ class PostgresField:
 
     Args:
         field_type (string, optional): Defaults to "".
-        required (boolean, optional): Defaults to False.
+        required (boolean, optional): Defaults to False. (i.e. NOT NULL)
         default (string, optional): Defaults to None.
         serial (boolean, optional): Defaults to False.
         primary_key (boolean, optional): Defaults to False.
         unique (boolean, optional): Defaults to False.
-        check (string, optional): Defaults to "".
-        generated_as (string, optional): Defaults to "".
+        check (string, optional): Defaults to "". (e.g. "number>0")
+        generated_as (string, optional): Defaults to "". (e.g. "park_fee" + "adjustment_fee")
         index_type (string, optional): Defaults to "". (e.g. BTREE, HASH, GIST, GIN, BRIN, SPGIST)
         customized_sql (string, optional): Defaults to "".
+        enum_class (PostgresEnum, optional): Defaults to None. If the field is an enum, the enum_class should be given and the field_type could be ignored.
+        customized_field (string, optional): Defaults to "".
     """
     def __init__(self, field_type="", required=False, default=None, serial=False, primary_key=False,
-                       unique=False, check="", generated_as="", index_type="", customized_sql="", enum_class=None):
+                       unique=False, check="", generated_as="", index_type="", customized_sql="",
+                       enum_class=None, customized_field="") -> None:
         self.field_type = field_type
         self.default = default
         self.required = required
@@ -1027,13 +1074,14 @@ class PostgresField:
         self.generated_as = generated_as
         self.index_type = index_type
         self.customized_sql = customized_sql
+        self.customized_field = customized_field
         self.enum_class = None
-        self.init_enum_class(enum_class)
+        self._init_enum_class(enum_class)
     
-    def __str__(self):
-        return f"{self.field_type.upper()}{self.get_default()}{self.get_required()}{self.get_serial()}{self.get_primary_key()}{self.get_unique()}{self.get_check()}{self.get_generated_as()}{self.get_customized_sql()}"
+    def __str__(self) -> str:
+        return  self.get_field()
 
-    def init_enum_class(self, enum_class):
+    def _init_enum_class(self, enum_class) -> None:
         if enum_class != None:
             enum_name = enum_class.meta["enum_name"][0]
             enum_schema_name = enum_class.meta["schema_name"][0] + "." if len(enum_class.meta["schema_name"]) > 0 else ""
@@ -1045,29 +1093,34 @@ class PostgresField:
                     raise ValueError(f"The enum name ({complete_enum_name}) does not match the field type ({self.field_type}).")
             self.enum_class = enum_class
 
-    def get_default(self):
+    def _get_default(self) -> str:
         return f" DEFAULT {self.default}" if self.default is not None else ""
     
-    def get_required(self):
+    def _get_required(self) -> str:
         return " NOT NULL" if self.required else ""
     
-    def get_serial(self):
+    def _get_serial(self) -> str:
         return " SERIAL" if self.serial else ""
     
-    def get_primary_key(self):
+    def _get_primary_key(self) -> str:
         return " PRIMARY KEY" if self.primary_key else ""
     
-    def get_unique(self):
+    def _get_unique(self) -> str:
         return " UNIQUE" if self.unique else ""
 
-    def get_check(self):
+    def _get_check(self) -> str:
         return f" CHECK ({self.check})" if self.check else ""
 
-    def get_generated_as(self):
+    def _get_generated_as(self) -> str:
         return f" GENERATED ALWAYS AS ({self.generated_as}) STORED" if self.generated_as else ""
     
-    def get_customized_sql(self):
+    def _get_customized_sql(self) -> str:
         return f" {self.customized_sql}" if self.customized_sql else ""
+
+    def get_field(self) -> str:
+        if self.customized_field != "":
+            return self.customized_field
+        return f"{self.field_type.upper()}{self._get_default()}{self._get_required()}{self._get_serial()}{self._get_primary_key()}{self._get_unique()}{self._get_check()}{self._get_generated_as()}{self._get_customized_sql()}"
 
 # if __name__ == "__main__":
 #     ph = PostgresHandler("10.0.0.32", 5432, "postgres", "postgres", "1234") # should print "Connection with database is OK"
