@@ -1,5 +1,33 @@
 # Update History
 
+## v0.2.0
+
+## Update `PostgresField`
+
+### Add `customized_field` parameter
+
+If programmers want to customize the field of the column, they can use the `customized_field` parameter. If `customized_field` is set, all the other parameters will be ignored.
+
+### Add `get_field` method
+
+Programmers could get the field of the column by using the `get_field` method.
+
+## Update `PostgresModelHandler`
+
+### Add `other_conditions_sql` in `meta`
+
+If programmers want to declare the constraints of the table, they can use the `other_conditions_sql` parameter in the `meta`. The `other_conditions_sql` will be added to the end of the header declaration.
+
+### Add `customized_sql` in `meta`
+
+If programmers want to add the customized SQL statement after the creation of the table, they can use the `customized_sql` parameter in the `meta`. This parameter is useful when programmers want to declare the partition of the table.
+
+## Update `PostgresEnum`
+
+### Add `mapping_value` parameter
+
+If programmers want to map the value of the enum to the other value, they can use the `mapping_value` parameter.
+
 ## v0.1.0
 
 ## Update `MongoHandler`
