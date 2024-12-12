@@ -34,6 +34,27 @@ class UniqueEnumKeyDict(OrderedDict):
             raise ValueError(f"Duplicate enum key: {key}")
         super().__setitem__(key, value)
 
+class ModelMeta(TypedDict):
+    initialize: bool
+    conditional_init: bool
+    init_index: bool
+    index_prefix: str
+    init_type: Literal["schema", "table", "enum"]
+    authorization: str
+    schema_name: Union[str, list]
+    table_name: Union[str, list]
+    enum_name: Union[str, list]
+    unique_constraint: List[Tuple[str, str]]
+    other_conditions_sql: str
+    customized_sql: str
+
+class PostgresResponse(TypedDict):
+    indicator: bool
+    message: str
+    header: List[str]
+    data: List[Tuple]
+    formatted_data: List[dict]
+
 class PostgresMeta(type):
     META_REQUIRED = ["init_type"]
     TABLE_META_REQUIRED = ["schema_name", "table_name"]
@@ -164,20 +185,6 @@ class PostgresMeta(type):
             new_class.meta = merged_meta
         return new_class
 
-class ModelMeta(TypedDict):
-    initialize: bool
-    conditional_init: bool
-    init_index: bool
-    index_prefix: str
-    init_type: Literal["schema", "table", "enum"]
-    authorization: str
-    schema_name: Union[str, list]
-    table_name: Union[str, list]
-    enum_name: Union[str, list]
-    unique_constraint: List[Tuple[str, str]]
-    other_conditions_sql: str
-    customized_sql: str
-
 class db_operation_mode(Enum):
     """
     Enum to define the mode of operations
@@ -203,14 +210,16 @@ class PostgresHandler:
         database (str): The database name.
         username (str): The username of the database.
         password (str): The password of the database.
+        connect_timeout (int, optional): The timeout of the connection. Defaults to 5.
     """
-    def __init__(self, host: str, port: int, database: str, username: str, password: str):
+    def __init__(self, host: str, port: int, database: str, username: str, password: str, connect_timeout: int = 5) -> None:
         self.db_type = "postgres"
         self.host = host
         self.port = port
         self.database = database
         self.username = username
         self.password = password
+        self.connect_timeout = connect_timeout
 
         self.table_header_dict = {}
 
@@ -221,7 +230,7 @@ class PostgresHandler:
         # test connection
         conn = None
         try:
-            conn = psycopg2.connect(database=self.database, user=self.username, password=self.password, host=self.host, port=self.port, connect_timeout=5)
+            conn = psycopg2.connect(database=self.database, user=self.username, password=self.password, host=self.host, port=self.port, connect_timeout=self.connect_timeout)
             logging.info(" [PostgresHandler] Connection with database is OK")
         except Exception as e:
             logging.warning(" [PostgresHandler] Cannot connect to database server, because "+str(e))
@@ -229,7 +238,7 @@ class PostgresHandler:
             if conn is not None:
                 conn.close()
 
-    def _execute_sql(self, mode, sql, entries=[], multiple=False, statement_timeout=-1):
+    def _execute_sql(self, mode: db_operation_mode, sql: str, entries: list = [], multiple: bool = False, statement_timeout: int = -1) -> PostgresResponse:
         """
         This is the function to execute sql command.
         If there are many data to insert/update, let the type of entries be list of list of args and set the param multiple to True,
@@ -252,7 +261,7 @@ class PostgresHandler:
                 - data (list of tuple): The return data from database. Empty list if the execution has no return.
                 - formatted_data (list of dictionary): The return data from database. Empty list if the execution has no return.
         """
-        result = {
+        result: PostgresResponse = {
             "indicator": False,
             "message": "",
             "header": [],
@@ -263,10 +272,10 @@ class PostgresHandler:
 
         try:
             if statement_timeout <= 0:
-                conn = psycopg2.connect(database=self.database, user=self.username, password=self.password, host=self.host, port=self.port, connect_timeout=5)
+                conn = psycopg2.connect(database=self.database, user=self.username, password=self.password, host=self.host, port=self.port, connect_timeout=self.connect_timeout)
             else:
                 timeout_arg = '-c statement_timeout='+str(statement_timeout*1000) # options for statement timeout
-                conn = psycopg2.connect(database=self.database, user=self.username, password=self.password, host=self.host, port=self.port, connect_timeout=5, options=timeout_arg)
+                conn = psycopg2.connect(database=self.database, user=self.username, password=self.password, host=self.host, port=self.port, connect_timeout=self.connect_timeout, options=timeout_arg)
             c = conn.cursor()
 
             if mode == db_operation_mode.MODE_DB_NORMAL:
@@ -304,23 +313,45 @@ class PostgresHandler:
         finally:
             if conn is not None:
                 conn.close()
-
         return result
 
-    def get_table_list(self):
+    def form_where_clause(self, conditional_rule_list: List[Tuple[str, str]]) -> str:
+        """
+        Form the where clause of the sql command.
+
+        Args:
+            conditional_rule_list (list of tuple): The condition for SELECT. The input should be like [("_id>", 1), ...]
+                The first element of tuple is the column name and the operator, 
+                the operator could be one of [=, <, >, <=, >=, LIKE].
+                The second element is the target value which could be in basic python datatype, it should contains '%' if you use LIKE operator.
+                e.g. [("_id=", 1)], [("camera_ip LIKE", "192.168%"), ("number<", 100)]
+
+        Returns:
+            where_clause (string): The where clause of the sql command.
+        """
+        where_clause = "WHERE "
+        for condition_rule in conditional_rule_list:
+            where_clause += "{} %s AND ".format(condition_rule[0])
+        where_clause = where_clause[:-4]
+        return where_clause
+
+    def get_table_list(self, statement_timeout: int = -1) -> List[str]:
         """
         Get the table list from database.
+        Args:
+            statement_timeout (int, optional): Defaults to -1.
+
         Returns:
             table_list: (list of string) the table list.
         """
         sql_cmd = "SELECT pg_tables.tablename FROM pg_catalog.pg_tables WHERE schemaname != 'pg_catalog' AND schemaname != 'information_schema';"
-        result = self._execute_sql(db_operation_mode.MODE_DB_W_RETURN_WO_ARGS, sql_cmd)
+        result = self._execute_sql(db_operation_mode.MODE_DB_W_RETURN_WO_ARGS, sql_cmd, statement_timeout=statement_timeout)
         table_list = []
         for t in result["data"]:
             table_list.append(t[0])
         return table_list
 
-    def get_headers(self, table_name, force=False, no_ser_pk=False):
+    def get_headers(self, table_name: str, force: bool = False, no_serial_pk: bool = False, statement_timeout: int = -1) -> List[str]:
         """
         If the table_name has been in self.table_header_dict already, get the header list from self.table_header_dict.
         If not, execute sql command to get the header and store it in self.table_header_dict.
@@ -329,8 +360,10 @@ class PostgresHandler:
             table_name (string): The table name to get column. If you need to specify the schema, you could let table_name="[your_schema].[your_table]"
             force (boolean, optional): Defaults to False.
                 Set to True if you want to get the header by executing sql command.
-            no_ser_pk (boolean, optional): Defaults to False.
+            no_serial_pk (boolean, optional): Defaults to False.
                 Set to True if you want to get the header without serial primary key.
+            statement_timeout (int, optional): Defaults to -1.
+        
         Returns:
             header_list: (list of string) the table's header.
         """
@@ -343,12 +376,13 @@ class PostgresHandler:
             else:
                 schema, table = 'public', table_name
             sql_cmd = "SELECT column_name FROM information_schema.columns WHERE (table_schema = '{}') AND (table_name = '{}')".format(schema, table)
-            if no_ser_pk:
+            if no_serial_pk:
                 sql_cmd += "  AND (column_default NOT LIKE 'nextval%' OR column_default IS NULL) AND (generation_expression IS NULL)"
-            result = self._execute_sql(db_operation_mode.MODE_DB_W_RETURN_WO_ARGS, "{};".format(sql_cmd))
+            result = self._execute_sql(db_operation_mode.MODE_DB_W_RETURN_WO_ARGS, "{};".format(sql_cmd), statement_timeout=statement_timeout)
             return [item[0] for item in result["data"]]
 
-    def get_data(self, table, target_column_list=[], conditional_rule_list=[], order_by_list=[], limit_number=-1):
+    def get_data(self, table: str, target_column_list: list = [], conditional_rule_list: list = [],
+                       order_by_list: list = [], limit_number: int = -1, statement_timeout: int = -1) -> PostgresResponse:
         """
         Args:
             - table (string): The name of the target table.
@@ -369,9 +403,10 @@ class PostgresHandler:
                 The second part is the rule, which could be "DESC" or "ASC"
             - limit_number (int, optional): Defaults to -1.
                 The limit number of output data. -1 means no limit
-
+            - statement_timeout (int, optional): Defaults to -1.
+        
         Returns:
-            result: result from _execute_sql without header and data
+            result (PostgresResponse)
         """
         try:
             sql_cmd = "SELECT "
@@ -384,11 +419,7 @@ class PostgresHandler:
 
             entries = []
             if len(conditional_rule_list) > 0:
-                sql_cmd += "WHERE "
-                for condition_rule in conditional_rule_list:
-                    sql_cmd += "{} %s AND ".format(condition_rule[0])
-                    entries.append(condition_rule[1])
-                sql_cmd = sql_cmd[:-4]
+                sql_cmd += self.form_where_clause(conditional_rule_list)
 
             if len(order_by_list) > 0:
                 sql_cmd += "ORDER BY "
@@ -403,18 +434,17 @@ class PostgresHandler:
             logging.debug("[PostgresHandler] get_data sql_cmd: %s, entries: %s"%(sql_cmd, str(entries)))
             if entries == []:
                 # No ARGS
-                result = self._execute_sql(db_operation_mode.MODE_DB_W_RETURN_WO_ARGS, sql_cmd)
+                result = self._execute_sql(db_operation_mode.MODE_DB_W_RETURN_WO_ARGS, sql_cmd, statement_timeout=statement_timeout)
             else:
                 # With ARGS
-                result = self._execute_sql(db_operation_mode.MODE_DB_W_RETURN_AND_ARGS, sql_cmd, entries)
-            
+                result = self._execute_sql(db_operation_mode.MODE_DB_W_RETURN_AND_ARGS, sql_cmd, entries, statement_timeout=statement_timeout)
             return result
         except Exception as e:
             msg = "[PostgresHandler] get_data ERROR: "+str(e)
             logging.error(msg)
-            return {"indicator": False, "message":msg, "header":[], "data":[], "formatted_data": []}
+            return {"indicator": False, "message":msg, "header": [], "data": [], "formatted_data": []}
         
-    def update_data(self, table, editing_list, reference_column_list):
+    def update_data(self, table: str, editing_list: list, reference_column_list: list, statement_timeout: int = -1) -> PostgresResponse:
         """
         Example:
                 self.update_data("unique_test", [{"_id":1, "roi_id":2}], ["_id"]) 
@@ -432,11 +462,10 @@ class PostgresHandler:
                 The key of the dictionary is the column names.
                 All of the dictionary in editing_list has to contain all of the key in reference_column_list.
             reference_column_list (list of string): Indicate which columns are for reference. The format should be like ["_id", ...]
+            statement_timeout (int, optional): Defaults to -1.
 
         Returns:
-            result (dictionary):
-                - indicator (boolean)
-                - message (string) 
+            result (PostgresResponse)
         """
         if editing_list == []:
             return {"indicator": True, "message": "Nothing to update."}
@@ -466,16 +495,15 @@ class PostgresHandler:
             sql_cmd = sql_cmd[:-4]+";"
 
             logging.debug("[PostgresHandler] update_data sql_cmd: %s, entries: %s"%(sql_cmd, str(entries)))
-            result = self._execute_sql(db_operation_mode.MODE_DB_W_ARGS, sql_cmd, entries, multiple=True)
-            del result["header"]
-            del result["data"]
+            result = self._execute_sql(db_operation_mode.MODE_DB_W_ARGS, sql_cmd, entries, multiple=True, statement_timeout=statement_timeout)
             return result
         except Exception as e:
             msg = "[PostgresHandler] update_data ERROR: "+str(e)
             logging.error(msg)
-            return {"indicator": False, "message":msg}
+            return {"indicator": False, "message": msg, "header": [], "data": [], "formatted_data": []}
 
-    def add_data(self, table, adding_list, adding_header_list=[], to_null=False, no_ser_pk=True):
+    def add_data(self, table: str, adding_list: list, adding_header_list: list = [], to_null: bool = False,
+                       no_serial_pk: bool = True, statement_timeout: int = -1) -> PostgresResponse:
         """
         Args:
             table (string): The name of the target table.
@@ -486,15 +514,16 @@ class PostgresHandler:
                 If this is an empty list, will get the complete header list from self.get_headers().
             to_null (boolean, optional): Defaults to False. If to_null == True, we will set the lacked data to null.
                 For example, adding_header_list=["camera_ip", "roi_id"], adding_list=[{"camera_ip":"123.456.789.0"}], then the target value of "roi_id" will be null(None).
-            no_ser_pk (boolean, optional): Defaults to True. If no_ser_pk == True, we will not add the serial primary key.
+            no_serial_pk (boolean, optional): Defaults to True. If no_serial_pk == True, we will not add the serial primary key.
+            statement_timeout (int, optional): Defaults to -1.
 
         Returns:
-            result: result from _execute_sql without header and data
+            result (PostgresResponse)
         """
         if adding_list == []:
             return {"indicator": True, "message": "Nothing to add."}
         if adding_header_list == []:
-            adding_header_list = self.get_headers(table, no_ser_pk=no_ser_pk)
+            adding_header_list = self.get_headers(table, no_serial_pk=no_serial_pk)
 
         try:
             column_name_cmd = ""
@@ -518,16 +547,15 @@ class PostgresHandler:
                     else:
                         raise Exception("Lack of Data ( {} ): {}".format(table, key))
             logging.debug("[PostgresHandler] add_data sql_cmd: %s, entries: %s"%(sql_cmd, str(entries)))
-            result = self._execute_sql(db_operation_mode.MODE_DB_W_ARGS, sql_cmd, entries, multiple=True)
-            del result["header"]
-            del result["data"]
+            result = self._execute_sql(db_operation_mode.MODE_DB_W_ARGS, sql_cmd, entries, multiple=True, statement_timeout=statement_timeout)
             return result
         except Exception as e:
             msg = "[PostgresHandler] add_data ERROR: "+str(e)
             logging.error(msg)
-            return {"indicator": False, "message":msg}
+            return {"indicator": False, "message": msg, "header": [], "data": [], "formatted_data": []}
 
-    def delete_data(self, table, filter_list, reference_column_list):
+    def delete_data(self, table: str, filter_list: list = [], reference_column_list: list = [],
+                          delete_all: bool = False, statement_timeout: int = -1) -> PostgresResponse:
         """
         Args:
             table (string): The name of the target table.
@@ -535,37 +563,41 @@ class PostgresHandler:
                 The format should be like [{"username":"linga", "lastupdatetime":456789}, {"username":"linga", "lastupdatetime":123456}, ...]
                 All of the dictionary in filter_list has to contain all of the key in reference_column_list.
             reference_column_list (list of string): Indicate which columns are for reference. The format should be like ["_id", ...]
-                
+            delete_all (boolean, optional): Defaults to False. If delete_all == True, delete all data in the table.
+            statement_timeout (int, optional): Defaults to -1.
+        
         Returns:
-            result: result from _execute_sql without header and data
+            result (PostgresResponse)
         """
-        if filter_list == []:
-            return {"indicator": True, "message": "Nothing to delete."}
-        if reference_column_list == []:
-            return {"indicator": False, "message": "No reference."}
-        if not all([set(reference_column_list).issubset(list(data.keys())) for data in filter_list]):
-            return {"indicator": False, "message": "Mismatch between reference_column_list and filter_list."}
+        if delete_all != True:
+            if filter_list == []:
+                return {"indicator": True, "message": "Nothing to delete."}
+            if reference_column_list == []:
+                return {"indicator": False, "message": "No reference."}
+            if not all([set(reference_column_list).issubset(list(data.keys())) for data in filter_list]):
+                return {"indicator": False, "message": "Mismatch between reference_column_list and filter_list."}
         
         try:
-            sql_cmd = "DELETE FROM {} WHERE ".format(table)
-            entries = []
-            for column in reference_column_list:
-                sql_cmd += "{}=%s AND ".format(column)
-            sql_cmd = sql_cmd[:-4]+";"
-
-            for data in filter_list:
-                entries.append([])
+            if delete_all != True:
+                sql_cmd = "DELETE FROM {} WHERE ".format(table)
+                entries = []
                 for column in reference_column_list:
-                    entries[-1].append(data[column])
-            logging.debug("[PostgresHandler] delete_data sql_cmd: %s, entries: %s"%(sql_cmd, str(entries)))
-            result = self._execute_sql(db_operation_mode.MODE_DB_W_ARGS, sql_cmd, entries, multiple=True)
-            del result["header"]
-            del result["data"]
+                    sql_cmd += "{}=%s AND ".format(column)
+                sql_cmd = sql_cmd[:-4]+";"
+
+                for data in filter_list:
+                    entries.append([])
+                    for column in reference_column_list:
+                        entries[-1].append(data[column])
+                logging.debug("[PostgresHandler] delete_data sql_cmd: %s, entries: %s"%(sql_cmd, str(entries)))
+                result = self._execute_sql(db_operation_mode.MODE_DB_W_ARGS, sql_cmd, entries, multiple=True, statement_timeout=statement_timeout)
+            else:
+                result = self._execute_sql(db_operation_mode.MODE_DB_NORMAL, "DELETE FROM {};".format(table), statement_timeout=statement_timeout)
             return result
         except Exception as e:
             msg = "[PostgresHandler] delete_data ERROR: "+str(e)
             logging.error(msg)
-            return {"indicator": False, "message":msg}
+            return {"indicator": False, "message": msg, "header": [], "data": [], "formatted_data": []}
 
 class PostgresModelHandler(metaclass=PostgresMeta):
     """
@@ -675,7 +707,7 @@ class PostgresModelHandler(metaclass=PostgresMeta):
         return ret_list
 
     @classmethod
-    def restore_enum_data(cls, table_data: list, target_columns=[]) -> list:
+    def restore_enum_data(cls, table_data: list, target_columns: list = []) -> list:
         """
         This is the method to restore the enum data.
 
@@ -857,7 +889,7 @@ class PostgresModelHandler(metaclass=PostgresMeta):
         return dic
     
     @classmethod
-    def form_schema_sql(cls, authorization=None) -> str:
+    def form_schema_sql(cls, authorization: Union[str, None] = None) -> str:
         if authorization == None:
             if cls.meta["authorization"] != None:
                 authorization = cls.meta["authorization"]
@@ -918,7 +950,7 @@ class PostgresModelHandler(metaclass=PostgresMeta):
         return table_sql
 
     @classmethod
-    def form_index_sql(cls, prefix="idx_") -> str:
+    def form_index_sql(cls, prefix: str = "idx_") -> str:
         """
         This is the method to form the index sql command.
 
@@ -985,7 +1017,7 @@ class PostgresModelHandler(metaclass=PostgresMeta):
             raise ValueError("Invalid init_type in meta.")
 
     @classmethod
-    def execute_sql(cls, postgres_handler: PostgresHandler, sql_cb=None):
+    def execute_sql(cls, postgres_handler: PostgresHandler, sql_cb: function = None, **kwargs):
         """
         This is the method to execute the sql command.
 
@@ -1000,7 +1032,10 @@ class PostgresModelHandler(metaclass=PostgresMeta):
             sql_input = sql_cb()
         else:
             sql_input = f"{' '.join(cls._schema_entries_dict.values())} {' '.join(cls._enum_entries_dict.values())} {' '.join(cls._table_entries_dict.values())} {' '.join(cls._index_entries_dict.values())}"
-        postgres_handler._execute_sql(db_operation_mode.MODE_DB_NORMAL, sql_input)
+        if sql_input != "":
+            postgres_handler._execute_sql(mode=db_operation_mode.MODE_DB_NORMAL, sql=sql_input, **kwargs)
+        else:
+            logging.warning(f"( {cls.__name__} ) No sql command)")
 
     @classmethod
     def clear_sql(cls):
@@ -1012,7 +1047,7 @@ class PostgresModelHandler(metaclass=PostgresMeta):
         cls._index_entries_dict = {}
 
     @classmethod
-    def if_initialize(cls, schema_name, table_name):
+    def if_initialize(cls, schema_name: str, table_name: str):
         """
         ** customized method **
         if_initialize is the method to form the conditional initialization sql command.
@@ -1028,7 +1063,7 @@ class PostgresModelHandler(metaclass=PostgresMeta):
         pass
 
     @classmethod
-    def else_initialize(cls, schema_name, table_name):
+    def else_initialize(cls, schema_name: str, table_name: str):
         """
         ** customized method **
         else_initialize is the method to form the conditional initialization sql command.
@@ -1050,7 +1085,7 @@ class PostgresField:
     Args:
         field_type (string, optional): Defaults to "".
         required (boolean, optional): Defaults to False. (i.e. NOT NULL)
-        default (string, optional): Defaults to None.
+        default (string, optional): Defaults to None. If the type is string, it should be in the format of "'value'".
         serial (boolean, optional): Defaults to False.
         primary_key (boolean, optional): Defaults to False.
         unique (boolean, optional): Defaults to False.
@@ -1061,9 +1096,9 @@ class PostgresField:
         enum_class (PostgresEnum, optional): Defaults to None. If the field is an enum, the enum_class should be given and the field_type could be ignored.
         customized_field (string, optional): Defaults to "".
     """
-    def __init__(self, field_type="", required=False, default=None, serial=False, primary_key=False,
-                       unique=False, check="", generated_as="", index_type="", customized_sql="",
-                       enum_class=None, customized_field="") -> None:
+    def __init__(self, field_type: str = "", required: bool = False, default: Union[str, None] = None, serial: bool = False, primary_key: bool = False,
+                       unique: bool = False, check: str = "", generated_as: str = "", index_type: str = "", customized_sql: str = "",
+                       enum_class: Union[PostgresModelHandler, None] = None, customized_field: str = "") -> None:
         self.field_type = field_type
         self.default = default
         self.required = required
@@ -1081,7 +1116,7 @@ class PostgresField:
     def __str__(self) -> str:
         return  self.get_field()
 
-    def _init_enum_class(self, enum_class) -> None:
+    def _init_enum_class(self, enum_class: PostgresModelHandler) -> None:
         if enum_class != None:
             enum_name = enum_class.meta["enum_name"][0]
             enum_schema_name = enum_class.meta["schema_name"][0] + "." if len(enum_class.meta["schema_name"]) > 0 else ""
