@@ -315,9 +315,9 @@ class PostgresHandler:
                 conn.close()
         return result
 
-    def form_where_clause(self, conditional_rule_list: List[Tuple[str, str]]) -> str:
+    def form_where_clause_and_entries(self, conditional_rule_list: List[Tuple[str, str]]) -> Tuple[str, list]:
         """
-        Form the where clause of the sql command.
+        Form the where clause and entries for the sql command.
 
         Args:
             conditional_rule_list (list of tuple): The condition for SELECT. The input should be like [("_id>", 1), ...]
@@ -328,12 +328,15 @@ class PostgresHandler:
 
         Returns:
             where_clause (string): The where clause of the sql command.
+            entries (list): The entries of the sql command.
         """
         where_clause = "WHERE "
+        entries = []
         for condition_rule in conditional_rule_list:
             where_clause += "{} %s AND ".format(condition_rule[0])
+            entries.append(condition_rule[1])
         where_clause = where_clause[:-4]
-        return where_clause
+        return where_clause, entries
 
     def get_table_list(self, statement_timeout: int = -1) -> List[str]:
         """
@@ -419,7 +422,9 @@ class PostgresHandler:
 
             entries = []
             if len(conditional_rule_list) > 0:
-                sql_cmd += self.form_where_clause(conditional_rule_list)
+                where_clause, new_entries = self.form_where_clause_and_entries(conditional_rule_list)
+                sql_cmd += where_clause
+                entries.extend(new_entries)
 
             if len(order_by_list) > 0:
                 sql_cmd += "ORDER BY "
