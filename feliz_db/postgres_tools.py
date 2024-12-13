@@ -2,7 +2,7 @@ import psycopg2
 import logging, traceback
 from enum import Enum
 from collections import OrderedDict
-from typing import TypedDict, Literal, Union, List, Tuple
+from typing import TypedDict, Literal, Union, List, Tuple, Callable
 
 class PostgresEnum:
     """
@@ -1017,7 +1017,7 @@ class PostgresModelHandler(metaclass=PostgresMeta):
             raise ValueError("Invalid init_type in meta.")
 
     @classmethod
-    def execute_sql(cls, postgres_handler: PostgresHandler, sql_cb: function = None, **kwargs):
+    def execute_sql(cls, postgres_handler: PostgresHandler, sql_cb: Union[Callable[[], str], None] = None, **kwargs):
         """
         This is the method to execute the sql command.
 
