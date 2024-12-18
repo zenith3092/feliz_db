@@ -1,5 +1,16 @@
 # Update History
 
+## v0.2.1
+
+### Update `meta` in `PostgresModelHandler`
+
+Now, There are no limitations on the length of the `schema_name`, `table_name`, and `enum_name`. Programmers can set the length of the `schema_name`, `table_name`, and `enum_name` to any length. If the length of them is greater than 1, system will automatically create the schema, table, or enum with the names in the list.
+
+### Add some new features about enum
+
+1. get_enum_full_dict() method
+2. get_enum_mapping_value() method
+
 ## v0.2.0
 
 ## Update `PostgresField`

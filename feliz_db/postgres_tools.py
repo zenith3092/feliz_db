@@ -120,8 +120,6 @@ class PostgresMeta(type):
                     elif type(table_name) == list:
                         if len(table_name) == 0:
                             raise ValueError(f"( {name} ) table_name should not be empty if init_type is table")
-                        elif len(table_name) > 1:
-                            raise ValueError(f"( {name} ) table_name should not be more than one")
                     else:
                         raise TypeError(f"( {name} ) table_name should be string or list")
                     
@@ -142,21 +140,17 @@ class PostgresMeta(type):
                         raise TypeError(f"( {name} ) schema_name should be string or list")
                 elif init_type == metacls.INIT_TYPE["ENUM"]:
                     enum_name = merged_meta["enum_name"]
-                    schema_name = merged_meta.get("schema_name", [])
+                    schema_name = merged_meta.get("schema_name", [""])
                     merged_meta["schema_name"] = schema_name
 
                     if type(schema_name) == str:
                         merged_meta["schema_name"] = [schema_name]
-                    if type(schema_name) == list and len(schema_name) > 1:
-                        raise ValueError(f"( {name} ) schema_name should be only one")
 
                     if type(enum_name) == str:
                         merged_meta["enum_name"] = [enum_name]
                     elif type(enum_name) == list:
                         if len(enum_name) == 0:
                             raise ValueError(f"( {name} ) enum_name should not be empty")
-                        elif len(enum_name) > 1:
-                            raise ValueError(f"( {name} ) enum_name should be only one")
                     else:
                         raise TypeError(f"( {name} ) enum_name should be string or list")
 
@@ -805,6 +799,33 @@ class PostgresModelHandler(metaclass=PostgresMeta):
         return {k: v.value for k, v in cls.__dict__.items() if isinstance(v, PostgresEnum)}
     
     @classmethod
+    def get_enum_full_dict(cls) -> dict:
+        """
+        This is the method to get the full enum dictionary.
+
+        Returns:
+            enum_dict (dict): The full enum dictionary.
+        """
+        return {k: {"value": v.value, "mapping_value": v.mapping_value} for k, v in cls.__dict__.items() if isinstance(v, PostgresEnum)}
+
+    @classmethod
+    def get_enum_mapping_value(cls, enum_value: str):
+        """
+        This is the method to get the mapping value of the enum.
+
+        Args:
+            enum_value (string): The enum value.
+        
+        Returns:
+            mapping_value (Any): The mapping value.
+        """
+        enum_key = cls.get_enum_reversed_dict().get(enum_value, None)
+        if enum_key == None:
+            raise ValueError(f"( {cls.__name__} ) The enum value '{enum_value}' is not defined in the enum class")
+        
+        return cls.get_enum_full_dict()[enum_key]["mapping_value"]
+
+    @classmethod
     def get_enum_conditions(cls) -> str:
         """
         This is the method to get the enum conditions.
@@ -904,9 +925,13 @@ class PostgresModelHandler(metaclass=PostgresMeta):
         if cls.meta["init_type"] != cls.INIT_TYPE["SCHEMA"]:
             raise ValueError(f"( {cls.__name__} )  init_type ({cls.meta['init_type']}) can't execute 'form_schema_sql' method")
         
-        return f"""
-        CREATE SCHEMA IF NOT EXISTS {cls.meta["schema_name"][0]} AUTHORIZATION {authorization};
-        """
+        schema_sql = ""
+        for schema_item in cls.meta["schema_name"]:
+            schema_sql += f"""
+            CREATE SCHEMA IF NOT EXISTS {schema_item} AUTHORIZATION {authorization};
+            """
+        
+        return schema_sql
 
     @classmethod
     def form_table_sql(cls) -> str:
@@ -920,10 +945,11 @@ class PostgresModelHandler(metaclass=PostgresMeta):
             raise ValueError(f"( {cls.__name__} )  init_type ({cls.meta['init_type']}) can't execute 'form_table_sql' method")
         
         table_sql = ""
-        for item in cls.meta["schema_name"]:
-            table_sql += f"""
-            CREATE TABLE IF NOT EXISTS {item}.{cls.meta["table_name"][0]} ( {cls.get_field_conditions()} {cls.get_unique_constraint_conditions()} {cls.get_other_conditions_sql()} ) {cls.meta["customized_sql"]};
-            """
+        for schema_item in cls.meta["schema_name"]:
+            for table_item in cls.meta["table_name"]:
+                table_sql += f"""
+                CREATE TABLE IF NOT EXISTS {schema_item}.{table_item} ( {cls.get_field_conditions()} {cls.get_unique_constraint_conditions()} {cls.get_other_conditions_sql()} ) {cls.meta["customized_sql"]};
+                """
         
         return table_sql
 
@@ -939,19 +965,21 @@ class PostgresModelHandler(metaclass=PostgresMeta):
             raise ValueError(f"( {cls.__name__} )  init_type ({cls.meta['init_type']}) can't execute 'form_table_conditional_sql' method")
         
         table_sql = ""
-        for item in cls.meta["schema_name"]:
-            if_conditions = cls.if_initialize(schema_name=item, table_name=cls.meta["table_name"][0])
-            else_conditions = cls.else_initialize(schema_name=item, table_name=cls.meta["table_name"][0])
-            table_sql += f"""
-            DO $$
-            BEGIN
-            IF NOT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = '{item}' AND table_name = '{cls.meta["table_name"][0]}') THEN
-                CREATE TABLE {item}.{cls.meta["table_name"][0]} ( {cls.get_field_conditions()} {cls.get_unique_constraint_conditions()} {cls.get_other_conditions_sql()} ) {cls.meta["customized_sql"]};
-                {if_conditions}
-            {"ELSE " + else_conditions if else_conditions else ""}
-            END IF;
-            END$$;
-            """
+        for schema_item in cls.meta["schema_name"]:
+            for table_item in cls.meta["table_name"]:
+                if_conditions = cls.if_initialize(schema_name=schema_item, table_name=table_item)
+                else_conditions = cls.else_initialize(schema_name=schema_item, table_name=table_item)
+                table_sql += f"""
+                DO $$
+                BEGIN
+                IF NOT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = '{schema_item}' AND table_name = '{table_item}') THEN
+                    CREATE TABLE {schema_item}.{table_item} ( {cls.get_field_conditions()} {cls.get_unique_constraint_conditions()} {cls.get_other_conditions_sql()} ) {cls.meta["customized_sql"]};
+                    {if_conditions}
+                {"ELSE " + else_conditions if else_conditions else ""}
+                END IF;
+                END$$;
+                """
+        
         return table_sql
 
     @classmethod
@@ -978,6 +1006,7 @@ class PostgresModelHandler(metaclass=PostgresMeta):
                 index_sql += f"""
                 CREATE INDEX IF NOT EXISTS {prefix}{column} ON {schema}.{cls.meta["table_name"][0]} USING {index_method.upper()} ({column});
                 """
+        
         return index_sql
     
     @classmethod
@@ -993,14 +1022,19 @@ class PostgresModelHandler(metaclass=PostgresMeta):
         if cls.meta["init_type"] != cls.INIT_TYPE["ENUM"]:
             raise ValueError(f"( {cls.__name__} )  init_type ({cls.meta['init_type']}) can't execute 'form_enum_sql' method")
         
-        return f"""
-        DO $$
-        BEGIN
-            IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = '{cls.meta["enum_name"][0]}') THEN
-            CREATE TYPE {cls.meta["schema_name"][0] + "." if len(cls.meta["schema_name"]) > 0 else ""}{cls.meta["enum_name"][0]} AS ENUM ({cls.get_enum_conditions()});
-            END IF;
-        END $$;
-        """
+        enum_sql = ""
+        for schema_item in cls.meta["schema_name"]:
+            for enum_item in cls.meta["enum_name"]:
+                enum_sql += f"""
+                DO $$
+                BEGIN
+                    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = '{enum_item}') THEN
+                        CREATE TYPE {schema_item + "." if schema_item != "" else ""}{enum_item} AS ENUM ({cls.get_enum_conditions()});
+                    END IF;
+                END $$;
+                """
+        
+        return enum_sql
 
     @classmethod
     def create_sql(cls):

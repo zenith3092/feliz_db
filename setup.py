@@ -9,7 +9,7 @@ with open(os.path.join(os.path.dirname(__file__), "requirements.txt"), "r") as f
 
 setuptools.setup(
     name="feliz_db",
-    version="0.2.1",
+    version="0.2.2-alpha.0",
     author="Vincent Wu, Linga Chen, Brian Yin",
     author_email="zenith3092@gmail.com",
     description="A framework designed to assist in using databases and compatible with feliz framework",
