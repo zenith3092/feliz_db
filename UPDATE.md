@@ -1,5 +1,11 @@
 # Update History
 
+## v0.2.3
+
+### Use connection pool in `PostgresHandler`
+
+In this version, the `PostgresHandler` is updated to use connection pool. The connection pool is created when the instance of `PostgresHandler` is created. The default minimum connection number is 1, and the default maximum connection number is 2. Programmers can customize the minimum and maximum connection number by using the parameters `minconn` and `maxconn` when creating the instance of `PostgresHandler`.
+
 ## v0.2.1
 
 ### Update `meta` in `PostgresModelHandler`
