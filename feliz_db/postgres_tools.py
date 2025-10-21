@@ -1,5 +1,8 @@
 import psycopg2  
 import logging, traceback
+
+from psycopg2.pool import SimpleConnectionPool
+
 from enum import Enum
 from collections import OrderedDict
 from typing import TypedDict, Literal, Union, List, Tuple, Callable
@@ -206,13 +209,15 @@ class PostgresHandler:
         password (str): The password of the database.
         connect_timeout (int, optional): The timeout of the connection. Defaults to 5.
     """
-    def __init__(self, host: str, port: int, database: str, username: str, password: str, connect_timeout: int = 5) -> None:
+    def __init__(self, host: str, port: int, database: str, username: str, password: str, minconn: int = 1, maxconn: int = 2, connect_timeout: int = 5) -> None:
         self.db_type = "postgres"
         self.host = host
         self.port = port
         self.database = database
         self.username = username
         self.password = password
+        self.minconn = minconn
+        self.maxconn = maxconn
         self.connect_timeout = connect_timeout
 
         self.table_header_dict = {}
@@ -231,6 +236,10 @@ class PostgresHandler:
         finally:
             if conn is not None:
                 conn.close()
+                self.set_connection_pool()
+
+    def set_connection_pool(self) -> None:
+        self.conn_pool = SimpleConnectionPool(self.minconn, self.maxconn, host=self.host, port=self.port, database=self.database, user=self.username, password=self.password, connect_timeout=self.connect_timeout)
 
     def _execute_sql(self, mode: db_operation_mode, sql: str, entries: list = [], multiple: bool = False, statement_timeout: int = -1) -> PostgresResponse:
         """
@@ -265,38 +274,37 @@ class PostgresHandler:
         conn = None
 
         try:
-            if statement_timeout <= 0:
-                conn = psycopg2.connect(database=self.database, user=self.username, password=self.password, host=self.host, port=self.port, connect_timeout=self.connect_timeout)
-            else:
-                timeout_arg = '-c statement_timeout='+str(statement_timeout*1000) # options for statement timeout
-                conn = psycopg2.connect(database=self.database, user=self.username, password=self.password, host=self.host, port=self.port, connect_timeout=self.connect_timeout, options=timeout_arg)
-            c = conn.cursor()
+            conn: psycopg2.extensions.connection = self.conn_pool.getconn()
 
-            if mode == db_operation_mode.MODE_DB_NORMAL:
-                c.execute(sql)
-            elif mode == db_operation_mode.MODE_DB_W_ARGS:
-                if multiple:
-                    c.executemany(sql, entries)
+            if statement_timeout > 0:
+                with conn.cursor() as c:
+                    c.execute("SET statement_timeout = %s;", (statement_timeout*1000))
+
+            with conn.cursor() as c:
+                if mode == db_operation_mode.MODE_DB_NORMAL:
+                    c.execute(sql)
+                elif mode == db_operation_mode.MODE_DB_W_ARGS:
+                    if multiple:
+                        c.executemany(sql, entries)
+                    else:
+                        c.execute(sql, entries)
+                elif mode == db_operation_mode.MODE_DB_W_RETURN_WO_ARGS:
+                    c.execute(sql)
+                    result["data"] = c.fetchall()
+                    result["header"] = [description[0] for description in c.description]
+                    result["formatted_data"] = [{result["header"][i]: value for i, value in enumerate(row)} for row in result["data"]]
+                elif mode == db_operation_mode.MODE_DB_W_RETURN_AND_ARGS:
+                    if multiple:
+                        c.executemany(sql, entries)
+                    else:
+                        c.execute(sql, entries)
+                    result["data"] = c.fetchall()
+                    result["header"] = [description[0] for description in c.description]
+                    result["formatted_data"] = [{result["header"][i]: value for i, value in enumerate(row)} for row in result["data"]]
                 else:
-                    c.execute(sql, entries)
-            elif mode == db_operation_mode.MODE_DB_W_RETURN_WO_ARGS:
-                c.execute(sql)
-                result["data"] = c.fetchall()
-                result["header"] = [description[0] for description in c.description]
-                result["formatted_data"] = [{result["header"][i]: value for i, value in enumerate(row)} for row in result["data"]]
-            elif mode == db_operation_mode.MODE_DB_W_RETURN_AND_ARGS:
-                if multiple:
-                    c.executemany(sql, entries)
-                else:
-                    c.execute(sql, entries)
-                result["data"] = c.fetchall()
-                result["header"] = [description[0] for description in c.description]
-                result["formatted_data"] = [{result["header"][i]: value for i, value in enumerate(row)} for row in result["data"]]
-            else:
-                raise Exception("Invalid mode")
+                    raise Exception("Invalid mode")
 
             conn.commit()
-            c.close()
 
             result["indicator"] = True
             result["message"] = "operation succeed"
@@ -306,7 +314,7 @@ class PostgresHandler:
             result["message"] = str(e)
         finally:
             if conn is not None:
-                conn.close()
+                self.conn_pool.putconn(conn)
         return result
 
     def form_where_clause_and_entries(self, conditional_rule_list: List[Tuple[str, str]]) -> Tuple[str, list]:
